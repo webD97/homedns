@@ -113,7 +113,7 @@ Order matters: `blocklist` goes immediately before `cache` (blocked names never 
 upstream, and a refreshed list applies at once) while staying below `prometheus`/`log` so
 blocked queries are still counted; `k8s_gateway` goes beside the other Kubernetes sources.
 `insertBefore` **panics if an anchor is missing**, so an upstream reordering becomes a red
-CI run on the bump PR rather than a silently misplaced plugin.
+CI run on the CoreDNS bump PR rather than a silently misplaced plugin.
 
 The image is `FROM scratch` and holds two files — the static binary and a CA
 bundle for the blocklist fetches. It runs as UID 65532 with a read-only root
@@ -121,15 +121,26 @@ filesystem and `NET_BIND_SERVICE` as its only capability.
 
 ## Keeping up with CoreDNS
 
-[`.github/workflows/bump-coredns.yml`](.github/workflows/bump-coredns.yml) runs weekly. It
-compares `go.mod` against the latest CoreDNS release and, if there is a new one, bumps it
-and runs the whole gate: build, `go test -race` (including the directive-order test), and
-starting the binary against the Corefile the chart generates. A PR is opened **only if
-that passes**; otherwise it files a tracking issue, because a breaking upstream change
-should be loud.
+Dependabot, in its own PR — CoreDNS sits in a single-member group in
+[`.github/dependabot.yml`](.github/dependabot.yml) so it is never batched with
+anything else and can be reverted on its own.
 
-Dependabot handles everything else and is configured to ignore CoreDNS so the two do not
-fight.
+There is no separate gate workflow: CI runs on every pull request, so a CoreDNS
+bump has to pass the whole thing — `go test -race` including the directive-order
+test, rendering the chart, booting the real binary against the Corefile the chart
+generates, and a multi-arch image build. A breaking upstream change shows up as a
+red PR.
+
+Images and charts are published from `v*` tags — there is no `:main` or automatic
+per-commit tag. Every PR still builds the multi-arch image, it just isn't pushed.
+To publish a build from an arbitrary commit, run the release workflow by hand:
+
+```console
+gh workflow run release.yml --ref my-branch            # 0.0.0-dev.<sha>
+gh workflow run release.yml --ref my-branch -f version=1.5.0-test.1
+```
+
+Manual builds never move `:latest`.
 
 A second scheduled workflow re-parses the live blocklists and checks the result against
 the entry count each publisher declares in its own header. A format change is otherwise

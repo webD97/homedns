@@ -4,16 +4,20 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels: [dependencies]
     groups:
+      # A single-member group, on purpose: CoreDNS is the thing this repo is
+      # built on, its bumps are the ones most likely to break the plugin chain,
+      # and they must be reviewable and revertable on their own. Keeping it in a
+      # named group means no future pattern can sweep it into a batch PR.
+      coredns:
+        patterns:
+          - "github.com/coredns/coredns"
       kubernetes:
         patterns:
           - "k8s.io/*"
           - "sigs.k8s.io/*"
-    ignore:
-      # Owned by .github/workflows/bump-coredns.yml, which gates the bump.
-      - dependency-name: github.com/coredns/coredns
 
   - package-ecosystem: github-actions
     directory: /
@@ -21,6 +25,8 @@ updates:
       interval: weekly
     labels: [dependencies]
 
+  # Tracks both FROM lines: the golang builder and the distroless stage the CA
+  # bundle is copied out of.
   - package-ecosystem: docker
     directory: /
     schedule:

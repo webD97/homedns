@@ -1,9 +1,22 @@
 name: Release
 
+# Tags publish automatically. Everything else is opt-in: run this workflow by
+# hand (Actions tab, or `gh workflow run release.yml --ref <branch>`) to push a
+# build from any commit. CI builds the image on every PR but never pushes it.
 on:
   push:
-    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish. Must be SemVer. Default: 0.0.0-dev.<short-sha>'
+        required: false
+        default: ''
+      chart:
+        description: 'Also package and push the Helm chart'
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -23,6 +36,7 @@ jobs:
       id-token: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -30,15 +44,33 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The single source of truth for the version; the chart job consumes it
+      # rather than parsing the ref a second time.
       - name: Resolve versions
         id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           echo "coredns=$(go list -m -f '{{.Version}}' github.com/coredns/coredns)" >> "$GITHUB_OUTPUT"
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            version="${INPUT_VERSION#v}"
           else
-            echo "version=0.0.0-main.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            version="0.0.0-dev.${GITHUB_SHA::7}"
           fi
+
+          # helm package rejects anything that is not SemVer2, and it is better
+          # to fail here than after the image has already been pushed.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$version' is not a valid SemVer version"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing $version from ${GITHUB_REF}"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -52,11 +84,17 @@ jobs:
         id: meta
         with:
           images: ${{ env.IMAGE }}
+          # The semver patterns only fire on a tag push; type=raw carries the
+          # resolved version for a manual run.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=branch
             type=sha,format=long
+            type=raw,value=${{ steps.v.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+          # Explicit rather than latest=auto: :latest moves only for a
+          # non-prerelease tag push, so no manual dev build can ever claim it.
+          flavor: |
+            latest=${{ github.event_name == 'push' && !contains(steps.v.outputs.version, '-') }}
 
       - uses: docker/build-push-action@v7
         id: build
@@ -89,8 +127,7 @@ jobs:
   chart:
     name: Chart
     needs: image
-    # Charts are versioned from git tags.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' || inputs.chart
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,24 +138,27 @@ jobs:
       - uses: azure/setup-helm@v5
 
       - name: Package and push
+        env:
+          VERSION: ${{ needs.image.outputs.version }}
         run: |
-          version="${GITHUB_REF#refs/tags/v}"
+          set -euo pipefail
           helm package charts/homedns \
-            --version "$version" \
-            --app-version "$version" \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
             --destination /tmp/chart
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm push "/tmp/chart/homedns-${version}.tgz" "${CHART_REPO}"
+          helm push "/tmp/chart/homedns-${VERSION}.tgz" "${CHART_REPO}"
 
       - name: Summary
+        env:
+          VERSION: ${{ needs.image.outputs.version }}
         run: |
-          version="${GITHUB_REF#refs/tags/v}"
           {
-            echo "### homedns $version"
+            echo "### homedns $VERSION"
             echo
             echo '```'
-            echo "docker pull ${IMAGE}:${version}"
-            echo "helm install homedns ${CHART_REPO}/homedns --version ${version}"
+            echo "docker pull ${IMAGE}:${VERSION}"
+            echo "helm install homedns ${CHART_REPO}/homedns --version ${VERSION}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
