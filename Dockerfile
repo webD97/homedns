@@ -22,8 +22,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags "-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
       -o /out/homedns .
 
-# distroless static carries the CA bundle the blocklist fetches need.
-FROM gcr.io/distroless/static-debian12:nonroot
+# The blocklist fetcher speaks HTTPS, so the image needs a CA bundle and nothing
+# else. Taken from distroless rather than the builder because distroless is
+# rebuilt on every ca-certificates update; golang:1.26-bookworm carries whatever
+# Debian snapshot that tag was built against. Pinned to BUILDPLATFORM — the
+# bundle is a single arch-independent file, so there is no reason to pull this
+# image once per target architecture.
+FROM --platform=$BUILDPLATFORM gcr.io/distroless/static-debian12:latest AS certs
+
+FROM scratch
 
 ARG VERSION=dev
 ARG REVISION=""
@@ -35,13 +42,21 @@ LABEL org.opencontainers.image.title="homedns" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.base.name="gcr.io/distroless/static-debian12:nonroot" \
+      org.opencontainers.image.base.name="scratch" \
       io.homedns.coredns.version="${COREDNS_VERSION}"
 
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/homedns /usr/local/bin/homedns
 
-# Binding :53 needs NET_BIND_SERVICE, granted by the chart's securityContext.
-USER nonroot:nonroot
+# Redundant (Go probes this path anyway), but it makes the image's one non-binary
+# file self-documenting and gives a lever for a custom bundle.
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+# Numeric, not a name: scratch has no /etc/passwd. This is also what kubelet
+# wants — it can only enforce runAsNonRoot against a numeric USER. Matches
+# podSecurityContext.runAsUser in the chart. Binding :53 needs NET_BIND_SERVICE,
+# granted by the chart's securityContext.
+USER 65532:65532
 
 EXPOSE 53/udp 53/tcp 9153/tcp
 
