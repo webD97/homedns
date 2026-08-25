@@ -11,21 +11,15 @@ import (
 	"testing"
 )
 
-// The lists conveniently declare their own entry count in a header comment,
-// which gives us an oracle: whatever the parser produces must equal what the
-// publisher says the file contains.
+// Each list declares its own entry count in a header comment, which is the
+// oracle this test checks the parser against.
 var (
 	stevenBlackCount = regexp.MustCompile(`(?m)^#\s*Number of unique domains:\s*([\d,]+)`)
 	oisdCount        = regexp.MustCompile(`(?m)^#\s*Entries:\s*([\d,]+)`)
 )
 
-// TestLiveLists downloads the real blocklists and checks the parser against the
-// count each one advertises in its own header.
-//
-// This is the test that catches a publisher changing their format — it is how
-// the "*." prefix on every oisd entry was found. It needs the network, so it is
-// opt-in rather than part of the default suite; CI runs it on a schedule and on
-// the CoreDNS bump PR.
+// TestLiveLists checks the parser against the live lists. Opt-in because it
+// needs the network; a scheduled workflow runs it.
 func TestLiveLists(t *testing.T) {
 	if os.Getenv("HOMEDNS_LIVE_LISTS") == "" {
 		t.Skip("set HOMEDNS_LIVE_LISTS=1 to check the parser against the live blocklists")
@@ -66,15 +60,14 @@ func TestLiveLists(t *testing.T) {
 					len(unique), tc.url, want)
 			}
 
-			// A count match alone would not have caught the "*." bug: 269k
-			// unmatchable entries still count as 269k.
+			// A matching count alone is not enough: unmatchable entries still
+			// count.
 			for n := range unique {
 				if strings.ContainsAny(n, "*/|^ \t") || strings.HasPrefix(n, ".") || strings.HasSuffix(n, ".") {
 					t.Fatalf("entry %q is not a usable query name", n)
 				}
 			}
 
-			// Spot-check that lookups actually work end to end.
 			set := newNameSet(names)
 			probe := "doubleclick.net"
 			if !set.covers(probe) && !set.covers("ads."+probe) {

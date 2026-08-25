@@ -1,7 +1,4 @@
-{{- /*
-Fail at render time rather than shipping a pod that crash-loops on a bad
-Corefile. Renders to nothing when the values are sane.
-*/ -}}
+{{- /* Fails at render time rather than shipping a crash-looping pod. */ -}}
 {{- if and .Values.gatewayAPI.enabled (not .Values.gatewayAPI.zones) }}
 {{- fail "gatewayAPI.enabled is true but gatewayAPI.zones is empty. Set the zone(s) this server is authoritative for, e.g. --set gatewayAPI.zones={home.example.com}, or disable it with --set gatewayAPI.enabled=false" }}
 {{- end }}

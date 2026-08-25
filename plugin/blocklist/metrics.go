@@ -6,13 +6,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Metrics land on prometheus.DefaultRegisterer, which is exactly what CoreDNS's
-// metrics plugin serves on /metrics (it takes DefaultRegisterer as its own
-// registry), so promauto at package level is all that's needed.
-//
-// Everything here is deliberately low cardinality: counters carry the standard
-// `server` label and per-source gauges are keyed by list URL, of which there
-// are a handful. No per-domain or per-client labels.
+// promauto registers on prometheus.DefaultRegisterer, which is the registry
+// CoreDNS's metrics plugin serves. Labels are deliberately low cardinality.
 var (
 	blockedCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: plugin.Namespace,

@@ -1,11 +1,7 @@
 {{- $fullname := include "homedns.fullname" . -}}
 {{- $svc := .Values.service -}}
-{{/*
-A Service carrying both TCP and UDP is fine on Kubernetes 1.26+ (mixed-protocol
-load balancers are GA) and works with MetalLB and Cilium. splitTcpUdp emits one
-Service per protocol for implementations that still reject it — at the cost of
-two load balancer addresses unless they are pinned to the same IP.
-*/}}
+{{/* splitTcpUdp emits one Service per protocol for load balancers that reject
+mixed-protocol Services, at the cost of two addresses. */}}
 {{- if $svc.splitTcpUdp }}
 {{- range $proto := list "tcp" "udp" }}
 apiVersion: v1

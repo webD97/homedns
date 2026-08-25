@@ -1,13 +1,9 @@
 name: Blocklist format check
 
-# Downloads the real blocklists and checks the parser against the entry count
-# each one declares in its own header.
-#
-# This exists because a publisher can change their format without any signal on
-# our side, and the failure is quiet: entries still load and the domain count
-# still looks healthy, but nothing matches. That is exactly what oisd's "*."
-# prefix on every entry would have caused. Kept out of CI because it needs the
-# network and depends on servers we do not control.
+# Checks the parser against the entry count each list declares in its own
+# header. A format change is otherwise silent: entries still load and the domain
+# count looks healthy while nothing matches. Out of CI because it needs servers
+# we do not control.
 
 on:
   schedule:

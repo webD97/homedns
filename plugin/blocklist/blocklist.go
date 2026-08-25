@@ -1,10 +1,6 @@
 // Package blocklist provides a CoreDNS plugin that answers NXDOMAIN for domains
-// named by downloaded blocklists, in the style of Pi-hole.
-//
-// Lists are held in memory only and re-downloaded on an interval, so the plugin
-// needs no persistent storage. Because the URLs must be resolved before this
-// server can answer anything, fetches go through a dedicated bootstrap
-// resolver rather than the ambient one.
+// named by downloaded blocklists, in the style of Pi-hole. See README.md for
+// the Corefile syntax and AGENTS.md for the design decisions.
 package blocklist
 
 import (
@@ -26,7 +22,6 @@ const (
 
 var log = clog.NewWithPlugin(pluginName)
 
-// Blocklist is the plugin handler.
 type Blocklist struct {
 	Next plugin.Handler
 
@@ -36,24 +31,19 @@ type Blocklist struct {
 	refresh      time.Duration
 	readyTimeout time.Duration
 
-	// current holds the active matcher. Refreshes build a replacement and swap
-	// it in, so ServeDNS never blocks on a lock or sees a half-built set.
 	current atomic.Pointer[matcher]
 	ready   atomic.Bool
 
-	// lastGood keeps the most recent successful parse per URL, so a source that
-	// starts failing keeps contributing instead of silently disappearing from
-	// the merged list. Only ever touched by the single refresh goroutine.
+	// lastGood holds the most recent successful parse per URL so a source that
+	// starts failing keeps contributing. Touched only by the refresh goroutine.
 	lastGood map[string][]string
 
 	stop context.CancelFunc
 	done chan struct{}
 }
 
-// Name implements plugin.Handler.
 func (b *Blocklist) Name() string { return pluginName }
 
-// ServeDNS implements plugin.Handler.
 func (b *Blocklist) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
 	server := metrics.WithServer(ctx)
@@ -61,10 +51,7 @@ func (b *Blocklist) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 	if b.current.Load().blocked(normalizeQuery(state.Name())) {
 		blockedCount.WithLabelValues(server).Inc()
 
-		// Plain NXDOMAIN with no SOA, matching what Pi-hole and dnsmasq return.
-		// Clients therefore pick their own negative-caching TTL, which is fine
-		// here: a lookup is a couple of binary searches, and not pinning a TTL
-		// means an allow entry added later takes effect immediately.
+		// Plain NXDOMAIN without an SOA, as Pi-hole and dnsmasq do.
 		msg := new(dns.Msg)
 		msg.SetRcode(r, dns.RcodeNameError)
 		msg.Authoritative = true
@@ -78,16 +65,11 @@ func (b *Blocklist) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 	return plugin.NextOrFailure(b.Name(), b.Next, ctx, w, r)
 }
 
-// Ready implements the readiness interface that CoreDNS's ready plugin looks
-// for on each handler in the chain.
-//
-// Reporting not-ready until a list is loaded keeps a freshly started pod out of
-// the load balancer while it would answer unfiltered. But it gives up after
-// readyTimeout and reports ready anyway: for a home network's only resolver,
-// losing ad blocking is a far better failure than losing DNS entirely.
+// Ready implements the interface CoreDNS's ready plugin looks for on each
+// handler in the chain. False until a list loads or readyTimeout elapses.
 func (b *Blocklist) Ready() bool { return b.ready.Load() }
 
-// start launches the refresh loop. Wired to caddy's OnStartup.
+// start launches the refresh loop; wired to caddy's OnStartup.
 func (b *Blocklist) start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	b.stop = cancel
@@ -114,10 +96,9 @@ func (b *Blocklist) start() error {
 	return nil
 }
 
-// shutdown stops the refresh loop and waits for it. Wired to caddy's
-// OnShutdown, which matters because the reload plugin rebuilds the handler on
-// every Corefile change — without this each reload would leak a goroutine and
-// an HTTP client.
+// shutdown stops the refresh loop and waits for it; wired to caddy's
+// OnShutdown. Needed because the reload plugin rebuilds the handler on every
+// Corefile change.
 func (b *Blocklist) shutdown() error {
 	if b.stop == nil {
 		return nil
@@ -142,8 +123,8 @@ func (b *Blocklist) failOpenAfterTimeout(ctx context.Context) {
 	}
 }
 
-// reload fetches every source and republishes the matcher. Runs only on the
-// refresh goroutine.
+// reload fetches every source and republishes the matcher. Refresh goroutine
+// only.
 func (b *Blocklist) reload(ctx context.Context) {
 	started := time.Now()
 	client := b.bootstrap.httpClient()
@@ -185,11 +166,10 @@ func (b *Blocklist) reload(ctx context.Context) {
 	domainsTotal.Set(float64(m.size()))
 	failOpen.Set(0)
 
+	verb := "refreshed"
 	if !b.ready.Swap(true) {
-		log.Infof("ready: %d blocked domains from %d source(s) in %s",
-			m.size(), len(b.urls), time.Since(started).Round(time.Millisecond))
-	} else {
-		log.Infof("refreshed: %d blocked domains from %d source(s) in %s",
-			m.size(), len(b.urls), time.Since(started).Round(time.Millisecond))
+		verb = "ready"
 	}
+	log.Infof("%s: %d blocked domains from %d source(s) in %s",
+		verb, m.size(), len(b.urls), time.Since(started).Round(time.Millisecond))
 }

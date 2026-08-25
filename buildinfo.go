@@ -9,15 +9,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Stamped via -ldflags at build time; see the Makefile.
+// Stamped via -ldflags; see the Makefile.
 var (
 	version  = "dev"
 	revision = ""
 )
 
-// homedns_build_info reports which homedns build is running and, importantly,
-// which upstream CoreDNS it was compiled against — the whole point of the
-// version-bump automation is knowing that at a glance.
 var buildInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "homedns_build_info",
 	Help: "Build information for the running homedns binary. Always 1.",
@@ -27,8 +24,8 @@ func init() {
 	buildInfo.WithLabelValues(version, vcsRevision(), coremain.CoreVersion, runtime.Version()).Set(1)
 }
 
-// vcsRevision prefers the ldflags-stamped value and falls back to the revision
-// the Go toolchain embeds, so `go build` without the Makefile still reports one.
+// vcsRevision prefers the ldflags value, falling back to what the toolchain
+// embeds so a plain `go build` still reports something.
 func vcsRevision() string {
 	if revision != "" {
 		return revision
