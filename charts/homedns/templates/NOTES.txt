@@ -1,0 +1,38 @@
+homedns {{ .Chart.AppVersion }} is installed as {{ include "homedns.fullname" . }}.
+
+Point your LAN clients at:
+{{- if eq .Values.service.type "LoadBalancer" }}
+
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "homedns.fullname" . }}{{ if .Values.service.splitTcpUdp }}-udp{{ end }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+  The address may be pending for a moment while the load balancer assigns it.
+{{- else }}
+
+  Service type is {{ .Values.service.type }}; expose port {{ .Values.service.port }} yourself.
+{{- end }}
+
+Check it:
+
+  dig @<address> example.com
+  dig @<address> doubleclick.net      # expect NXDOMAIN once the blocklist loads
+{{- if .Values.gatewayAPI.enabled }}
+  dig @<address> <a hostname from an HTTPRoute in {{ join ", " .Values.gatewayAPI.zones }}>
+{{- end }}
+
+{{- if .Values.blocklist.enabled }}
+
+Pods report NotReady until a blocklist has loaded (up to {{ .Values.blocklist.readyTimeout }}),
+so no traffic is sent to a replica that would answer unfiltered. Watch it with:
+
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} -f
+{{- end }}
+{{- if .Values.metrics.enabled }}
+
+Metrics on port {{ .Values.metrics.port }}:
+
+  coredns_dns_requests_total                 total queries
+  coredns_blocklist_blocked_total            queries blocked
+  coredns_blocklist_allowed_total            queries passed through
+  coredns_blocklist_domains_total            domains currently loaded
+  coredns_blocklist_fail_open                1 = serving unfiltered, alert on this
+{{- end }}

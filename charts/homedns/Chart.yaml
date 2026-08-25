@@ -1,0 +1,19 @@
+apiVersion: v2
+name: homedns
+description: CoreDNS for a home network — Pi-hole style blocklists plus Kubernetes Gateway API name resolution
+type: application
+# Overwritten at release time from the git tag.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/webd97/homedns
+sources:
+  - https://github.com/webd97/homedns
+keywords:
+  - dns
+  - coredns
+  - adblock
+  - pihole
+  - gateway-api
+maintainers:
+  - name: webd97
+    url: https://github.com/webd97

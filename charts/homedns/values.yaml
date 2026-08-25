@@ -1,0 +1,143 @@
+image:
+  repository: ghcr.io/webd97/homedns
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Two replicas so a rolling update never leaves the network without DNS.
+replicaCount: 2
+
+nameOverride: ""
+fullnameOverride: ""
+
+# --- Pi-hole replacement -----------------------------------------------------
+blocklist:
+  enabled: true
+
+  # Lists are downloaded into memory; nothing is persisted, so no volume is
+  # needed. Both /etc/hosts-format and bare-domain lists are auto-detected.
+  urls:
+    - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+    # - https://big.oisd.nl/domainswild
+
+  # Resolves the URLs above. This server cannot resolve them itself (that is
+  # circular), and in-cluster DNS may forward back here, so these must be
+  # literal IPs of an external resolver.
+  bootstrapDNS:
+    - 1.1.1.1
+    - 9.9.9.9
+
+  # Names to never block. Each entry covers the name and its subdomains.
+  allow: []
+
+  refresh: 24h
+
+  # How long to stay NotReady waiting for a first list before giving up and
+  # serving unfiltered. Losing ad blocking beats losing DNS for the whole LAN.
+  readyTimeout: 60s
+
+# --- external-dns replacement ------------------------------------------------
+gatewayAPI:
+  enabled: true
+
+  # Required when enabled: the zones this server is authoritative for. Only
+  # hostnames inside these zones are answered from cluster resources.
+  zones: []
+  # - home.example.com
+
+  # Subset of: Ingress, Service, HTTPRoute, TLSRoute, GRPCRoute, DNSEndpoint.
+  resources:
+    - HTTPRoute
+
+  # Restrict to specific gatewayClassName values; empty watches all.
+  gatewayClasses: []
+  ttl: 60
+  fallthrough: true
+
+# --- resolver ----------------------------------------------------------------
+upstream:
+  # DNS-over-TLS by default.
+  servers:
+    - tls://1.1.1.1
+    - tls://1.0.0.1
+  tlsServername: cloudflare-dns.com
+
+cache:
+  enabled: true
+  ttl: 300
+
+# Static LAN records, inlined into the Corefile — no extra file or volume.
+#   - ip: 10.0.0.5
+#     names: [nas.home.example, files.home.example]
+hosts: []
+
+# Per-query logging. Off by default: a home LAN generates a lot of lines.
+log: false
+
+# Replaces the generated Corefile entirely. Everything above is ignored when set.
+corefile: ""
+
+# --- networking --------------------------------------------------------------
+service:
+  type: LoadBalancer
+  # Some load balancer implementations still refuse a Service carrying both TCP
+  # and UDP. Set true to emit one Service per protocol instead.
+  splitTcpUdp: false
+  port: 53
+  loadBalancerIP: ""
+  loadBalancerClass: ""
+  externalTrafficPolicy: Local
+  annotations: {}
+
+metrics:
+  enabled: true
+  port: 9153
+  service:
+    annotations: {}
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# --- workload ----------------------------------------------------------------
+resources:
+  requests:
+    cpu: 50m
+    # Headroom for the in-memory blocklist: ~10 MB for StevenBlack + oisd
+    # combined, plus the DNS cache.
+    memory: 128Mi
+  limits:
+    memory: 384Mi
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+    # Required to bind :53 as a non-root user.
+    add: [NET_BIND_SERVICE]

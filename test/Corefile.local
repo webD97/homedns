@@ -1,0 +1,35 @@
+# Local smoke-test config: `make run`, then query port 1053.
+#
+#   dig @127.0.0.1 -p 1053 doubleclick.net     -> NXDOMAIN (blocked)
+#   dig @127.0.0.1 -p 1053 example.com         -> resolves
+#   curl -s localhost:9153/metrics | grep blocklist
+#
+# No k8s_gateway here — see charts/homedns/values.yaml for that.
+.:1053 {
+    errors
+    log
+
+    prometheus 127.0.0.1:9153
+    health     127.0.0.1:8080
+    ready      127.0.0.1:8181
+
+    blocklist {
+        url https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+        url https://big.oisd.nl/domainswild
+
+        # Blocklist URLs cannot be resolved through this server itself.
+        bootstrap_dns 1.1.1.1 9.9.9.9
+
+        refresh 24h
+    }
+
+    cache 300
+
+    forward . tls://1.1.1.1 tls://1.0.0.1 {
+        tls_servername cloudflare-dns.com
+    }
+
+    loop
+    reload
+    loadbalance
+}
