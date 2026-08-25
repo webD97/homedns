@@ -15,15 +15,13 @@ fullnameOverride: ""
 blocklist:
   enabled: true
 
-  # Lists are downloaded into memory; nothing is persisted, so no volume is
-  # needed. Both /etc/hosts-format and bare-domain lists are auto-detected.
+  # /etc/hosts-format and bare-domain lists are both auto-detected.
   urls:
     - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
     # - https://big.oisd.nl/domainswild
 
-  # Resolves the URLs above. This server cannot resolve them itself (that is
-  # circular), and in-cluster DNS may forward back here, so these must be
-  # literal IPs of an external resolver.
+  # Resolves the URLs above. Must be literal IPs of an external resolver: this
+  # server cannot resolve them itself, and cluster DNS may forward back here.
   bootstrapDNS:
     - 1.1.1.1
     - 9.9.9.9
@@ -33,16 +31,16 @@ blocklist:
 
   refresh: 24h
 
-  # How long to stay NotReady waiting for a first list before giving up and
-  # serving unfiltered. Losing ad blocking beats losing DNS for the whole LAN.
+  # How long to stay NotReady waiting for a first list before serving
+  # unfiltered.
   readyTimeout: 60s
 
 # --- external-dns replacement ------------------------------------------------
 gatewayAPI:
   enabled: true
 
-  # Required when enabled: the zones this server is authoritative for. Only
-  # hostnames inside these zones are answered from cluster resources.
+  # Required when enabled. Only hostnames inside these zones are answered from
+  # cluster resources.
   zones: []
   # - home.example.com
 
@@ -81,8 +79,7 @@ corefile: ""
 # --- networking --------------------------------------------------------------
 service:
   type: LoadBalancer
-  # Some load balancer implementations still refuse a Service carrying both TCP
-  # and UDP. Set true to emit one Service per protocol instead.
+  # For load balancers that refuse a Service carrying both TCP and UDP.
   splitTcpUdp: false
   port: 53
   loadBalancerIP: ""
@@ -104,8 +101,7 @@ metrics:
 resources:
   requests:
     cpu: 50m
-    # Headroom for the in-memory blocklist: ~10 MB for StevenBlack + oisd
-    # combined, plus the DNS cache.
+    # ~10 MB for StevenBlack + oisd combined, plus the DNS cache.
     memory: 128Mi
   limits:
     memory: 384Mi

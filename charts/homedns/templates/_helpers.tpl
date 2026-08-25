@@ -39,10 +39,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
-{{/*
-True when the Gateway API integration is on and RESOURCE is in the watched set.
-Used to keep the ClusterRole to only what is actually watched.
-*/}}
+{{/* True when the Gateway API integration is on and RESOURCE is watched. */}}
 {{- define "homedns.watches" -}}
 {{- $resource := .resource -}}
 {{- $root := .root -}}
@@ -60,10 +57,7 @@ Used to keep the ClusterRole to only what is actually watched.
 {{- end -}}
 {{- end }}
 
-{{/*
-The Corefile. Plugin order inside this file is irrelevant — CoreDNS orders the
-chain itself — but it is written in execution order to read the way it runs.
-*/}}
+{{/* Plugin order here is irrelevant; CoreDNS orders the chain itself. */}}
 {{- define "homedns.corefile" -}}
 {{- if .Values.corefile -}}
 {{ .Values.corefile }}

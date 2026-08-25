@@ -17,7 +17,7 @@
         url https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
         url https://big.oisd.nl/domainswild
 
-        # Blocklist URLs cannot be resolved through this server itself.
+        # Cannot be resolved through this server itself.
         bootstrap_dns 1.1.1.1 9.9.9.9
 
         refresh 24h

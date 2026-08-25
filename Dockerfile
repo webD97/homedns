@@ -4,8 +4,7 @@ FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 
 WORKDIR /src
 
-# Dependencies first: the CoreDNS module graph is large, so keeping this layer
-# keyed only on go.mod/go.sum saves re-downloading it on every source change.
+# Dependencies first: the CoreDNS module graph is large.
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
@@ -23,8 +22,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags "-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
       -o /out/homedns .
 
-# distroless static already carries the CA bundle, which the blocklist plugin
-# needs to fetch lists over HTTPS.
+# distroless static carries the CA bundle the blocklist fetches need.
 FROM gcr.io/distroless/static-debian12:nonroot
 
 ARG VERSION=dev
@@ -42,8 +40,7 @@ LABEL org.opencontainers.image.title="homedns" \
 
 COPY --from=build /out/homedns /usr/local/bin/homedns
 
-# Binding :53 needs NET_BIND_SERVICE, granted by the Helm chart's
-# securityContext rather than by running as root.
+# Binding :53 needs NET_BIND_SERVICE, granted by the chart's securityContext.
 USER nonroot:nonroot
 
 EXPOSE 53/udp 53/tcp 9153/tcp

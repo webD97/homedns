@@ -1,12 +1,8 @@
 name: Bump CoreDNS
 
-# Tracks upstream CoreDNS releases and opens a PR only when the whole build,
-# test and chart suite still passes against the new version. If it does not, a
-# tracking issue is filed instead — a breaking upstream change must be visible,
-# never silently skipped.
-#
-# Dependabot handles every other dependency; it is configured to ignore CoreDNS
-# so the two do not fight over go.mod.
+# Opens a PR only when the full gate passes against the new CoreDNS version;
+# files a tracking issue otherwise. Dependabot handles every other dependency
+# and ignores CoreDNS so the two do not fight over go.mod.
 
 on:
   schedule:
@@ -66,9 +62,8 @@ jobs:
           go get "github.com/coredns/coredns@${{ steps.versions.outputs.latest }}"
           go mod tidy
 
-      # Everything below is the gate. The directive-order test is the important
-      # one: it fails loudly if upstream renamed or reordered the plugin chain
-      # anchors this build splices into.
+      # The gate. TestDirectiveOrder is the important one: it fails if upstream
+      # renamed or reordered the anchors directives.go splices into.
       - name: Build
         id: gate_build
         if: steps.versions.outputs.uptodate == 'false'
@@ -122,8 +117,6 @@ jobs:
 
             Upstream release notes: https://github.com/coredns/coredns/releases/tag/${{ steps.versions.outputs.latest }}
 
-      # A failed gate is the interesting outcome: it means upstream changed
-      # something this distribution depends on.
       - name: File a tracking issue on failure
         if: failure() && steps.versions.outputs.uptodate == 'false'
         env:

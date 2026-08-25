@@ -89,7 +89,7 @@ jobs:
   chart:
     name: Chart
     needs: image
-    # Charts are versioned from git tags, so only publish on a tag.
+    # Charts are versioned from git tags.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

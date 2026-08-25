@@ -18,7 +18,6 @@ const (
 	defaultReadyTimeout = 60 * time.Second
 )
 
-// Cloudflare and Quad9. Only used to resolve the blocklist URLs themselves.
 var defaultBootstrapDNS = []string{"1.1.1.1:53", "9.9.9.9:53"}
 
 func init() { plugin.Register(pluginName, setup) }
@@ -54,8 +53,8 @@ func parseConfig(c *caddy.Controller) (*Blocklist, error) {
 		}
 		configured = true
 
-		// RemainingArgs rather than NextArg: NextArg happily returns the
-		// opening brace as if it were an argument.
+		// RemainingArgs, not NextArg: NextArg returns the opening brace as an
+		// argument.
 		if args := c.RemainingArgs(); len(args) > 0 {
 			return nil, c.Err("blocklist takes no arguments; configure sources with `url` inside the block")
 		}
@@ -164,9 +163,9 @@ func validateURL(raw string) error {
 	return nil
 }
 
-// normalizeDNSAddr accepts a bare IP or an ip:port and returns a dialable
-// host:port. Requiring a literal IP is the point: a hostname here would need
-// resolving, which is the very thing the bootstrap resolver exists to avoid.
+// normalizeDNSAddr accepts a bare IP or ip:port and returns a dialable
+// host:port. Hostnames are rejected: resolving one is what the bootstrap
+// resolver exists to avoid.
 func normalizeDNSAddr(raw string) (string, error) {
 	if addr, err := netip.ParseAddr(raw); err == nil {
 		return net.JoinHostPort(addr.String(), "53"), nil

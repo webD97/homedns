@@ -45,8 +45,6 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
-      # Includes test/integration_test.go, which builds the binary and queries
-      # it over the wire.
       - name: Test
         run: go test ./... -race -timeout 600s
 
@@ -64,7 +62,6 @@ jobs:
 
       - run: helm lint charts/homedns --set gatewayAPI.zones={home.example.com}
 
-      # Both load balancer shapes must render.
       - name: Render
         run: |
           helm template homedns charts/homedns \
@@ -75,8 +72,8 @@ jobs:
           helm template homedns charts/homedns \
             --set gatewayAPI.enabled=false > /dev/null
 
-      # The chart's whole job is producing a valid Corefile, so check that the
-      # real binary accepts the one it generates.
+      # The chart's job is producing a valid Corefile, so check the real binary
+      # accepts the one it generates.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -107,7 +104,6 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # Build only — publishing happens in release.yml.
       - uses: docker/build-push-action@v7
         with:
           context: .

@@ -12,9 +12,7 @@ updates:
           - "k8s.io/*"
           - "sigs.k8s.io/*"
     ignore:
-      # Owned by .github/workflows/bump-coredns.yml, which gates the bump on the
-      # full test suite and files an issue when it breaks. Two mechanisms
-      # updating the same module would fight.
+      # Owned by .github/workflows/bump-coredns.yml, which gates the bump.
       - dependency-name: github.com/coredns/coredns
 
   - package-ecosystem: github-actions

@@ -1,10 +1,5 @@
-// Package test runs the actual homedns binary against a real Corefile and
-// queries it over the wire.
-//
-// The unit tests exercise the plugin in isolation; this is what proves the
-// pieces are wired together — that the directive really is registered, that it
-// sits ahead of the plugins that would otherwise answer, and that the ready
-// endpoint gates on the blocklist.
+// Package test runs the homedns binary against a real Corefile and queries it
+// over the wire.
 package test
 
 import (
@@ -45,8 +40,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// The list is served slowly on purpose so the readiness gate is observable
-// rather than a race.
+// Slow on purpose, so the readiness gate is observable rather than a race.
 const listLoadDelay = 1500 * time.Millisecond
 
 const blocklistBody = `# test list
@@ -54,10 +48,8 @@ const blocklistBody = `# test list
 *.tracker.example.net
 `
 
-// The hosts entries deliberately shadow every blocked name. If the blocklist
-// were missing, misordered, or parsed wrong, these addresses would come back
-// instead of NXDOMAIN — so a passing test cannot be explained by the names
-// simply not existing.
+// The hosts entries shadow every blocked name, so an NXDOMAIN here proves
+// blocking rather than absence. Do not remove them.
 const corefileTemplate = `.:{{DNS}} {
     blocklist {
         url {{URL}}
@@ -108,8 +100,7 @@ func TestEndToEnd(t *testing.T) {
 
 	t.Run("not ready until the blocklist loads", func(t *testing.T) {
 		if code := readyCode(t, readyAddr); code != http.StatusServiceUnavailable {
-			t.Errorf("/ready returned %d before the list loaded, want 503 — a pod in this "+
-				"state would be sent traffic it cannot filter", code)
+			t.Errorf("/ready returned %d before the list loaded, want 503", code)
 		}
 	})
 
@@ -158,8 +149,7 @@ func TestEndToEnd(t *testing.T) {
 	t.Run("metrics", func(t *testing.T) {
 		body := get(t, "http://"+metricsAddr+"/metrics")
 
-		// 2 subtrees survive pruning: ads.example.com covers its children, and
-		// tracker.example.net covers cdn.tracker.example.net.
+		// 2 subtrees survive pruning.
 		for _, want := range []string{
 			"coredns_blocklist_domains_total 2",
 			"coredns_blocklist_fail_open 0",
@@ -232,9 +222,7 @@ func get(t *testing.T, url string) string {
 	return string(body)
 }
 
-// freeAddr returns a 127.0.0.1:port that was free a moment ago. Racy in
-// principle, fine in practice, and the alternative (fixed ports) collides with
-// whatever else is on the machine.
+// freeAddr returns a 127.0.0.1:port that was free a moment ago.
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")

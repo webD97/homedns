@@ -101,9 +101,7 @@ func newTestBlocklist(t *testing.T, urls []string, readyTimeout time.Duration) *
 		refresh:      time.Hour,
 		readyTimeout: readyTimeout,
 		lastGood:     map[string][]string{},
-		// httptest serves on an IP literal, so nothing here is resolved; the
-		// bootstrap servers just need to be valid.
-		bootstrap: newBootstrapResolver(defaultBootstrapDNS),
+		bootstrap:    newBootstrapResolver(defaultBootstrapDNS),
 	}
 }
 
@@ -133,9 +131,7 @@ func TestReadyAfterFirstLoad(t *testing.T) {
 	}
 }
 
-// A home network's only resolver must not stay out of service because a
-// blocklist host is unreachable: after ready_timeout it reports ready and
-// serves unfiltered, flagging the state in a metric.
+// Must not stay out of service because a blocklist host is unreachable.
 func TestReadyFailsOpenAfterTimeout(t *testing.T) {
 	failOpen.Set(0)
 
@@ -189,8 +185,7 @@ func TestRefreshKeepsLastGoodOnFailure(t *testing.T) {
 	}
 }
 
-// A 200 that parses to nothing is an error page or a moved list, not an empty
-// blocklist — treating it as success would silently disable filtering.
+// A 200 that parses to nothing is an error page, not an empty blocklist.
 func TestEmptyResponseTreatedAsFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("<html>404 not found</html>\n"))
@@ -214,8 +209,6 @@ func TestShutdownStopsRefreshLoop(t *testing.T) {
 	}
 	waitFor(t, b.Ready, 5*time.Second, "plugin never became ready")
 
-	// shutdown blocks until the goroutine is gone; the reload plugin rebuilds
-	// the handler on every Corefile change, so a leak here compounds.
 	done := make(chan error, 1)
 	go func() { done <- b.shutdown() }()
 	select {
