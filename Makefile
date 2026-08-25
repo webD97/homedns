@@ -39,9 +39,12 @@ loadtest: ## Fire every domain from two real blocklists at the binary
 	./scripts/loadtest.sh
 
 .PHONY: lint
-lint: ## Vet and format check
+lint: ## Vet, format check and golangci-lint (same checks as CI)
 	go vet ./...
 	@out=$$(gofmt -l . ); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	@command -v golangci-lint >/dev/null \
+		|| { echo "golangci-lint not on PATH; see https://golangci-lint.run/docs/welcome/install/"; exit 1; }
+	golangci-lint run
 
 .PHONY: tidy
 tidy: ## Tidy go.mod

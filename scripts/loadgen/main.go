@@ -113,7 +113,9 @@ func worker(queue <-chan string, server string, timeout time.Duration, wantRcode
 		r.mu.Unlock()
 		return
 	}
-	defer conn.Close()
+	// Closed through a closure because the reconnect below replaces conn; a
+	// plain defer would bind the original and leak the replacement.
+	defer func() { _ = conn.Close() }()
 
 	var (
 		latencies  []time.Duration
@@ -127,7 +129,7 @@ func worker(queue <-chan string, server string, timeout time.Duration, wantRcode
 		msg := new(dns.Msg).SetQuestion(dns.Fqdn(name), dns.TypeA)
 
 		start := time.Now()
-		conn.SetDeadline(time.Now().Add(timeout))
+		_ = conn.SetDeadline(time.Now().Add(timeout))
 		werr := conn.WriteMsg(msg)
 		var resp *dns.Msg
 		if werr == nil {
@@ -144,7 +146,7 @@ func worker(queue <-chan string, server string, timeout time.Duration, wantRcode
 			}
 			// A dead connection stays dead; reconnect rather than burning
 			// through the rest of the queue with errors.
-			conn.Close()
+			_ = conn.Close()
 			if c, derr := client.Dial(server); derr == nil {
 				conn = c
 			} else {
@@ -239,7 +241,7 @@ func readNames(path string, limit int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var names []string
 	sc := bufio.NewScanner(f)

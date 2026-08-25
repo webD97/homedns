@@ -1,0 +1,11 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # Tests ignore Close/Write/Kill errors on fixtures by design: if a test
+      # fixture breaks, the assertions fail anyway, and checking every one of
+      # them buries the actual test logic.
+      - path: '_test\.go'
+        linters:
+          - errcheck

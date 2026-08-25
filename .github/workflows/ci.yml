@@ -38,7 +38,9 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned: `latest` means a linter release can break a green branch
+          # with no change of ours.
+          version: v2.13.1
 
       - name: go mod tidy is up to date
         run: |
