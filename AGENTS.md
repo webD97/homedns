@@ -33,7 +33,7 @@ three upstream facts, all worth re-checking if a bump breaks:
 `directives.go` splices `blocklist` before `cache` and `k8s_gateway` before
 `kubernetes`. `insertBefore` **panics on a missing anchor** — deliberate: a
 blocklist that silently runs after `cache` is the kind of bug nobody notices, so
-an upstream reorder must fail the bump PR instead.
+an upstream reorder must fail the CoreDNS bump PR instead.
 
 Placement reasoning, if you ever move them:
 
@@ -216,17 +216,53 @@ reset (use `increase(...[24h])` for Pi-hole-style daily totals). If you add
 anything needing disk, that is a design change — raise it rather than adding a
 PVC.
 
+## Releases
+
+`release.yml` publishes on a `v*` tag, or on demand via `workflow_dispatch`.
+Never on a branch push. `ci.yml` builds the multi-arch image on every PR with
+`push: false`, so the build is proven without publishing.
+
+Manual publish, from any branch or commit:
+
+```console
+gh workflow run release.yml --ref my-branch
+gh workflow run release.yml --ref my-branch -f version=1.5.0-test.1 -f chart=false
+```
+
+With no `version` input it derives `0.0.0-dev.<short-sha>`. The version is
+validated against SemVer **before** anything is pushed — `helm package` would
+reject a bad one only after the image was already published, which is the wrong
+order to fail in.
+
+Two things to preserve if you touch this:
+
+- **The version is a job output** (`needs.image.outputs.version`), resolved once
+  in the `image` job. It used to be parsed from `refs/tags/v*` in both jobs,
+  which silently produces garbage on a branch ref.
+- **`:latest` is gated explicitly** to a non-prerelease tag push, not
+  `latest=auto`. A manual dev build must never be able to claim it.
+
+A tag additionally pushes `:X.Y.Z` and `:X.Y`; every run pushes `sha-<full>`,
+signs the digest with cosign, attaches an SBOM, and pushes the chart at the same
+version to `oci://ghcr.io/<owner>/charts`.
+
 ## Upstream tracking
 
-`bump-coredns.yml` runs weekly, bumps CoreDNS, and opens a PR **only if** build,
-`go test -race`, and the chart-Corefile boot all pass. Otherwise it files an
-issue. Dependabot handles everything else and ignores CoreDNS so the two don't
-fight.
+Dependabot only. CoreDNS is a **single-member group** in `dependabot.yml` so it
+always lands in its own PR, never batched, never `ignore`d. There used to be a
+`bump-coredns.yml` that resolved the latest release, bumped it, ran a gate, and
+opened a PR only on success — it was removed as redundant: `ci.yml` runs on
+`pull_request`, so Dependabot's PR already gets build, `go test -race`, the chart
+render, the chart-Corefile boot and the image build.
+
+The one behaviour that changed: a breaking bump now shows up as a **red PR**
+rather than no PR plus a filed issue. Don't re-add a gate workflow to get the
+issue back; a red PR on a named branch is the same signal.
 
 When a bump fails, check in this order: the plugin chain changed upstream
 (`TestDirectiveOrder`), the plugin API changed, or `k8s_gateway` is behind — it
 pins its own CoreDNS version and may need a release first. Go MVS resolves to
-the higher version, so our pin wins; the gate is what proves that's safe.
+the higher version, so our pin wins; CI is what proves that's safe.
 
 ## Conventions
 
