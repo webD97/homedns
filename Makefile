@@ -4,12 +4,18 @@ BINARY  ?= homedns
 IMAGE   ?= ghcr.io/webd97/homedns
 CHART   ?= charts/homedns
 
+# podman works as a drop-in here; buildx targets need docker.
+CONTAINER_TOOL ?= docker
+
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 COREDNS_VERSION = $(shell go list -m -f '{{.Version}}' github.com/coredns/coredns)
 
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.revision=$(REVISION)
 PLATFORMS ?= linux/amd64,linux/arm64
+
+# validate.yaml refuses to render without zones; ci.yml passes the same thing.
+CHART_ZONES := --set gatewayAPI.zones={home.example.com}
 
 .PHONY: help
 help: ## Show this help
@@ -47,7 +53,7 @@ run: build ## Run locally against test/Corefile.local
 
 .PHONY: image
 image: ## Build the OCI image for the host platform
-	docker build \
+	$(CONTAINER_TOOL) build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg REVISION=$(REVISION) \
 		--build-arg COREDNS_VERSION=$(COREDNS_VERSION) \
@@ -63,9 +69,10 @@ image-multiarch: ## Build (not push) the multi-arch image
 
 .PHONY: chart-lint
 chart-lint: ## Lint and render the Helm chart
-	helm lint $(CHART)
-	helm template homedns $(CHART) >/dev/null
-	helm template homedns $(CHART) --set service.splitTcpUdp=true >/dev/null
+	helm lint $(CHART) $(CHART_ZONES)
+	helm template homedns $(CHART) $(CHART_ZONES) >/dev/null
+	helm template homedns $(CHART) $(CHART_ZONES) --set service.splitTcpUdp=true >/dev/null
+	helm template homedns $(CHART) --set gatewayAPI.enabled=false >/dev/null
 
 .PHONY: coredns-version
 coredns-version: ## Print the CoreDNS version this build embeds

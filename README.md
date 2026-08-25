@@ -115,6 +115,10 @@ blocked queries are still counted; `k8s_gateway` goes beside the other Kubernete
 `insertBefore` **panics if an anchor is missing**, so an upstream reordering becomes a red
 CI run on the bump PR rather than a silently misplaced plugin.
 
+The image is `FROM scratch` and holds two files — the static binary and a CA
+bundle for the blocklist fetches. It runs as UID 65532 with a read-only root
+filesystem and `NET_BIND_SERVICE` as its only capability.
+
 ## Keeping up with CoreDNS
 
 [`.github/workflows/bump-coredns.yml`](.github/workflows/bump-coredns.yml) runs weekly. It

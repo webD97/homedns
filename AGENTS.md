@@ -172,7 +172,41 @@ addition* to any inline entries. The chart's generated Corefile uses the inline
 form, so a deployed pod also answers from the container's own `/etc/hosts`
 (localhost entries and the pod IP). Harmless in practice, but it is why a name
 can resolve that no chart value mentions — that is how the load test's one
-mismatch produced NOERROR rather than SERVFAIL.
+mismatch produced NOERROR rather than SERVFAIL. This holds on the `scratch`
+image too: the file comes from the container runtime, not the image.
+
+## Container image
+
+`FROM scratch` with exactly two files: the binary and a CA bundle. Verified with
+`podman export | tar -t` — if that listing ever grows, something crept in.
+
+It was `gcr.io/distroless/static-debian12:nonroot`, which is 964 files of which
+we used one. The CA bundle is still copied *from* distroless in a throwaway
+`certs` stage rather than from the builder, because distroless is rebuilt on
+every `ca-certificates` update while `golang:1.26-bookworm` carries whatever
+Debian snapshot that tag was built from. Dependabot's docker ecosystem tracks
+both `FROM` lines.
+
+Consequences of scratch, all deliberate:
+
+- **`USER` must be numeric** (`65532:65532`). There is no `/etc/passwd` to
+  resolve a name against, and kubelet can only enforce `runAsNonRoot` against a
+  numeric UID anyway. Must stay in step with `podSecurityContext.runAsUser`.
+- **No `/tmp`.** Nothing here writes to it, and the chart sets
+  `readOnlyRootFilesystem: true`, so it would be unwritable regardless.
+- **No tzdata**, so `time.Local` is UTC. This costs nothing: CoreDNS's
+  `coremain.LogFlags` defaults to `0`, so it prints no timestamps at all, and
+  nothing in the tree formats local time. Embedding `time/tzdata` was tried and
+  reverted — 414 KB for no observable behaviour. Re-check this only if something
+  starts emitting wall-clock time.
+- **`/etc/hosts` and `/etc/resolv.conf` still exist at runtime** — the container
+  runtime bind-mounts them and creates the mount points. Confirmed on scratch:
+  querying `localhost` still answers `127.0.0.1` from the `hosts` plugin.
+
+The CA bundle is the one thing a broken build breaks silently: without it the
+blocklist fetch fails TLS, every source errors, and the plugin fails open after
+`ready_timeout`. `SSL_CERT_FILE` is set explicitly — redundant, since Go probes
+that path anyway, but it makes the dependency greppable.
 
 ## Statelessness
 
@@ -217,7 +251,10 @@ make coredns-version
 
 ## Status
 
-Everything above is verified except the **container image** — Docker was not
-available in the environment where this was built, so the Dockerfile and the
-multi-arch build have been reviewed but never run. CI's `image` job is their
-first real test.
+All verified, including the **container image** — built with podman for
+`linux/amd64` and `linux/arm64`, and run end to end: fetched a real blocklist
+over HTTPS (45,675 subtrees), answered NXDOMAIN for a listed domain and its
+subdomain, and came up clean under `--read-only --cap-drop=ALL`.
+
+Not yet exercised: the chart against a live cluster, and `release.yml`'s
+push/sign/SBOM path.
