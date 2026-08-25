@@ -98,13 +98,16 @@ metrics:
     labels: {}
 
 # --- workload ----------------------------------------------------------------
+# Measured RSS: ~73 MB with the single default list (45k subtrees), ~150 MB with
+# ~600k domains across two large lists. The limit matters more than the request:
+# a refresh transiently holds the raw list text plus the rebuilt set, so peak is
+# well above steady state. Raise both if you add large lists.
 resources:
   requests:
     cpu: 50m
-    # ~10 MB for StevenBlack + oisd combined, plus the DNS cache.
     memory: 128Mi
   limits:
-    memory: 384Mi
+    memory: 512Mi
 
 podAnnotations: {}
 podLabels: {}

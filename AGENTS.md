@@ -126,6 +126,54 @@ The chart is also tested by rendering its Corefile and booting the real binary
 against it — a chart that renders valid YAML but an invalid Corefile is the
 failure mode worth catching.
 
+## Load testing
+
+`make loadtest` (or `scripts/loadtest.sh`) starts the binary with two real
+blocklists, fires **every** domain on them at it, and prints the metrics. It is
+a correctness check as much as a throughput one: a domain that answers anything
+but NXDOMAIN was parsed into a form that cannot match.
+
+Measured on a 16-core dev box, 576,100 domains (Pi-hole-Optimized comprehensive
++ StevenBlack), 48 workers:
+
+| | |
+| --- | --- |
+| list load | 1.6s for 612k raw → 421,894 subtrees after pruning |
+| throughput | ~124k q/s, all NXDOMAIN |
+| latency | p50 371µs, p99 1.35ms |
+| RSS | ~150 MB steady |
+
+RSS scales with list size but is dominated by the Go runtime and parse
+transients rather than the matcher itself (which is ~10 MB for this set):
+
+| lists | subtrees | RSS |
+| --- | --- | --- |
+| StevenBlack only (chart default) | 45,675 | ~73 MB |
+| comprehensive + StevenBlack | 421,894 | ~150 MB |
+
+The chart requests 128Mi and limits 512Mi off the back of this. The **limit** is
+the number that matters: a refresh transiently holds the raw list text, the
+parsed names, and the rebuilt sorted set at once, so peak runs well above steady
+state. Adding large lists needs the limit raised, not just the request.
+
+Two gotchas the script itself had to learn:
+
+- **Its query filter must mirror `parse.go` exactly**, including the
+  `localNames` rejection. Otherwise it asks about `localhost.localdomain`, which
+  the plugin deliberately never blocks, and reports a failure that isn't one.
+- **`dig -f` is not viable** as a load generator: it is sequential and took over
+  two minutes for 2,000 queries, which extrapolates to ~10 hours here. Hence
+  `scripts/loadgen/`.
+
+## The hosts plugin also reads /etc/hosts
+
+CoreDNS's `hosts` plugin defaults to `/etc/hosts` when given no FILE, *in
+addition* to any inline entries. The chart's generated Corefile uses the inline
+form, so a deployed pod also answers from the container's own `/etc/hosts`
+(localhost entries and the pod IP). Harmless in practice, but it is why a name
+can resolve that no chart value mentions — that is how the load test's one
+mismatch produced NOERROR rather than SERVFAIL.
+
 ## Statelessness
 
 No PV, and no volume beyond the Corefile ConfigMap. Blocklists live in memory
