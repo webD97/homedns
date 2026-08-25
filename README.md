@@ -136,6 +136,7 @@ silent: entries still load and the domain count still looks right while nothing 
 ```console
 make test          # unit + integration (builds the binary, queries it over the wire)
 make test-live     # check the parser against the live blocklists
+make loadtest      # fire ~576k real blocked domains at the binary
 make lint
 make chart-lint
 make image

@@ -28,6 +28,10 @@ test: ## Run unit and integration tests
 test-live: ## Check the parser against the live upstream blocklists (needs network)
 	HOMEDNS_LIVE_LISTS=1 go test ./plugin/blocklist/ -run TestLiveLists -v -count=1
 
+.PHONY: loadtest
+loadtest: ## Fire every domain from two real blocklists at the binary
+	./scripts/loadtest.sh
+
 .PHONY: lint
 lint: ## Vet and format check
 	go vet ./...
