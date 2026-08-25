@@ -1,0 +1,57 @@
+name: Blocklist format check
+
+# Downloads the real blocklists and checks the parser against the entry count
+# each one declares in its own header.
+#
+# This exists because a publisher can change their format without any signal on
+# our side, and the failure is quiet: entries still load and the domain count
+# still looks healthy, but nothing matches. That is exactly what oisd's "*."
+# prefix on every entry would have caused. Kept out of CI because it needs the
+# network and depends on servers we do not control.
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Parse the live lists
+        env:
+          HOMEDNS_LIVE_LISTS: '1'
+        run: go test ./plugin/blocklist/ -run TestLiveLists -v -count=1
+
+      - name: File a tracking issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Blocklist parser disagrees with an upstream list"
+
+          {
+            printf 'A blocklist no longer parses to the entry count it advertises, which usually means the publisher changed their format.\n\n'
+            printf 'Run: %s\n\n' "$RUN_URL"
+            printf 'Deployed instances may be loading entries that cannot match any query — the domain count stays healthy while filtering silently stops. Check `plugin/blocklist/parse.go` against the current file.\n'
+          } > /tmp/issue-body.md
+
+          existing=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file /tmp/issue-body.md
+          else
+            gh issue create --title "$title" --body-file /tmp/issue-body.md --label blocklist
+          fi

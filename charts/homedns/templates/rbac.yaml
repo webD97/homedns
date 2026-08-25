@@ -1,0 +1,59 @@
+{{- if .Values.gatewayAPI.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "homedns.fullname" . }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+rules:
+# k8s_gateway checks which CRDs are installed before starting its informers, so
+# this is needed regardless of which resources are watched.
+- apiGroups: [apiextensions.k8s.io]
+  resources: [customresourcedefinitions]
+  verbs: [get, list, watch]
+
+{{- if include "homedns.watchesGatewayAPI" . }}
+- apiGroups: [gateway.networking.k8s.io]
+  resources: ["*"]
+  verbs: [list, watch]
+{{- end }}
+
+{{- if include "homedns.watches" (dict "root" . "resource" "Service") }}
+- apiGroups: [""]
+  resources: [services, namespaces]
+  verbs: [list, watch]
+- apiGroups: [discovery.k8s.io]
+  resources: [endpointslices]
+  verbs: [list, watch]
+{{- end }}
+
+{{- if include "homedns.watches" (dict "root" . "resource" "Ingress") }}
+- apiGroups: [networking.k8s.io]
+  resources: [ingresses]
+  verbs: [list, watch]
+{{- end }}
+
+{{- if include "homedns.watches" (dict "root" . "resource" "DNSEndpoint") }}
+- apiGroups: [externaldns.k8s.io]
+  resources: [dnsendpoints]
+  verbs: [get, list, watch]
+- apiGroups: [externaldns.k8s.io]
+  resources: [dnsendpoints/status]
+  verbs: ["*"]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "homedns.fullname" . }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "homedns.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "homedns.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

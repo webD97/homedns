@@ -1,0 +1,13 @@
+{{- /*
+Fail at render time rather than shipping a pod that crash-loops on a bad
+Corefile. Renders to nothing when the values are sane.
+*/ -}}
+{{- if and .Values.gatewayAPI.enabled (not .Values.gatewayAPI.zones) }}
+{{- fail "gatewayAPI.enabled is true but gatewayAPI.zones is empty. Set the zone(s) this server is authoritative for, e.g. --set gatewayAPI.zones={home.example.com}, or disable it with --set gatewayAPI.enabled=false" }}
+{{- end }}
+{{- if and .Values.blocklist.enabled (not .Values.blocklist.urls) }}
+{{- fail "blocklist.enabled is true but blocklist.urls is empty. Add a list URL, or set blocklist.enabled=false" }}
+{{- end }}
+{{- if and .Values.blocklist.enabled .Values.blocklist.urls (not .Values.blocklist.bootstrapDNS) }}
+{{- fail "blocklist.bootstrapDNS must name at least one resolver IP: this server cannot resolve its own blocklist URLs, and cluster DNS may forward back to it" }}
+{{- end }}

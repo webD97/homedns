@@ -1,0 +1,152 @@
+name: Bump CoreDNS
+
+# Tracks upstream CoreDNS releases and opens a PR only when the whole build,
+# test and chart suite still passes against the new version. If it does not, a
+# tracking issue is filed instead — a breaking upstream change must be visible,
+# never silently skipped.
+#
+# Dependabot handles every other dependency; it is configured to ignore CoreDNS
+# so the two do not fight over go.mod.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: azure/setup-helm@v5
+
+      - name: Resolve current and latest CoreDNS
+        id: versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          current=$(go list -m -f '{{.Version}}' github.com/coredns/coredns)
+
+          # /releases/latest already excludes drafts and prereleases.
+          latest=$(gh api repos/coredns/coredns/releases/latest --jq .tag_name)
+
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest"  >> "$GITHUB_OUTPUT"
+          echo "Current: $current"
+          echo "Latest:  $latest"
+
+          if [ "$current" = "$latest" ]; then
+            echo "uptodate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "uptodate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Already current
+        if: steps.versions.outputs.uptodate == 'true'
+        run: echo "Already on ${{ steps.versions.outputs.current }}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update go.mod
+        if: steps.versions.outputs.uptodate == 'false'
+        run: |
+          set -euo pipefail
+          go get "github.com/coredns/coredns@${{ steps.versions.outputs.latest }}"
+          go mod tidy
+
+      # Everything below is the gate. The directive-order test is the important
+      # one: it fails loudly if upstream renamed or reordered the plugin chain
+      # anchors this build splices into.
+      - name: Build
+        id: gate_build
+        if: steps.versions.outputs.uptodate == 'false'
+        run: go build ./...
+
+      - name: Test
+        id: gate_test
+        if: steps.versions.outputs.uptodate == 'false'
+        run: go test ./... -race -timeout 600s
+
+      - name: Chart still renders a valid Corefile
+        id: gate_chart
+        if: steps.versions.outputs.uptodate == 'false'
+        run: |
+          set -euo pipefail
+          helm lint charts/homedns --set gatewayAPI.zones={home.example.com}
+          go build -o /tmp/homedns .
+          helm template homedns charts/homedns \
+            --set gatewayAPI.enabled=false \
+            --set service.port=1054 \
+            --set metrics.port=9154 \
+            --set blocklist.enabled=false \
+            | python3 -c "import sys,yaml;[print(d['data']['Corefile']) for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind')=='ConfigMap']" \
+            > /tmp/Corefile
+          /tmp/homedns -conf /tmp/Corefile &
+          pid=$!
+          sleep 3
+          kill -0 $pid || { echo "server exited: the generated Corefile is invalid"; exit 1; }
+          kill $pid
+
+      - name: Open pull request
+        if: steps.versions.outputs.uptodate == 'false'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/coredns-${{ steps.versions.outputs.latest }}
+          delete-branch: true
+          commit-message: "chore: bump CoreDNS to ${{ steps.versions.outputs.latest }}"
+          title: "chore: bump CoreDNS to ${{ steps.versions.outputs.latest }}"
+          labels: dependencies
+          body: |
+            Bumps the embedded CoreDNS from `${{ steps.versions.outputs.current }}` to `${{ steps.versions.outputs.latest }}`.
+
+            Opened only because the full gate passed on the new version:
+
+            - `go build ./...`
+            - `go test ./... -race` — including the directive-order test, which
+              verifies `blocklist` still sits ahead of `cache` and `k8s_gateway`
+              ahead of `kubernetes` in the upstream plugin chain
+            - `helm lint`, plus starting the binary against the Corefile the
+              chart generates
+
+            Upstream release notes: https://github.com/coredns/coredns/releases/tag/${{ steps.versions.outputs.latest }}
+
+      # A failed gate is the interesting outcome: it means upstream changed
+      # something this distribution depends on.
+      - name: File a tracking issue on failure
+        if: failure() && steps.versions.outputs.uptodate == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.versions.outputs.latest }}
+          CURRENT: ${{ steps.versions.outputs.current }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="CoreDNS ${LATEST} does not build cleanly"
+
+          {
+            printf 'Bumping CoreDNS `%s` -> `%s` failed its gate, so no PR was opened and this repository is still on `%s`.\n\n' "$CURRENT" "$LATEST" "$CURRENT"
+            printf 'Run: %s\n\n' "$RUN_URL"
+            printf 'Most likely causes, in order:\n\n'
+            printf '1. **The plugin chain changed upstream.** `directives.go` splices `blocklist` before `cache` and `k8s_gateway` before `kubernetes`; `insertBefore` panics if either anchor is gone. Check `TestDirectiveOrder`.\n'
+            printf '2. **The plugin API changed**, breaking `plugin/blocklist` or `github.com/k8s-gateway/k8s_gateway`.\n'
+            printf '3. **k8s_gateway is behind.** It pins its own CoreDNS version; a new release of it may be needed first.\n'
+          } > /tmp/issue-body.md
+
+          existing=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file /tmp/issue-body.md
+          else
+            gh issue create --title "$title" --body-file /tmp/issue-body.md --label dependencies
+          fi

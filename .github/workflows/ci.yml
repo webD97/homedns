@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: go mod tidy is up to date
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      # Includes test/integration_test.go, which builds the binary and queries
+      # it over the wire.
+      - name: Test
+        run: go test ./... -race -timeout 600s
+
+      - name: Report embedded CoreDNS version
+        run: |
+          echo "CoreDNS $(go list -m -f '{{.Version}}' github.com/coredns/coredns)" >> "$GITHUB_STEP_SUMMARY"
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+
+      - run: helm lint charts/homedns --set gatewayAPI.zones={home.example.com}
+
+      # Both load balancer shapes must render.
+      - name: Render
+        run: |
+          helm template homedns charts/homedns \
+            --set gatewayAPI.zones={home.example.com} > /dev/null
+          helm template homedns charts/homedns \
+            --set gatewayAPI.zones={home.example.com} \
+            --set service.splitTcpUdp=true > /dev/null
+          helm template homedns charts/homedns \
+            --set gatewayAPI.enabled=false > /dev/null
+
+      # The chart's whole job is producing a valid Corefile, so check that the
+      # real binary accepts the one it generates.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generated Corefile is valid
+        run: |
+          go build -o /tmp/homedns .
+          helm template homedns charts/homedns \
+            --set gatewayAPI.enabled=false \
+            --set service.port=1054 \
+            --set metrics.port=9154 \
+            --set blocklist.enabled=false \
+            | python3 -c "import sys,yaml;[print(d['data']['Corefile']) for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind')=='ConfigMap']" \
+            > /tmp/Corefile
+          cat /tmp/Corefile
+          /tmp/homedns -conf /tmp/Corefile &
+          pid=$!
+          sleep 3
+          kill -0 $pid || { echo "server exited: the generated Corefile is invalid"; exit 1; }
+          kill $pid
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build only — publishing happens in release.yml.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

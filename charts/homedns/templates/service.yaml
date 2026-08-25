@@ -1,0 +1,115 @@
+{{- $fullname := include "homedns.fullname" . -}}
+{{- $svc := .Values.service -}}
+{{/*
+A Service carrying both TCP and UDP is fine on Kubernetes 1.26+ (mixed-protocol
+load balancers are GA) and works with MetalLB and Cilium. splitTcpUdp emits one
+Service per protocol for implementations that still reject it — at the cost of
+two load balancer addresses unless they are pinned to the same IP.
+*/}}
+{{- if $svc.splitTcpUdp }}
+{{- range $proto := list "tcp" "udp" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-%s" $fullname $proto }}
+  labels:
+    {{- include "homedns.labels" $ | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type }}
+  {{- if $svc.loadBalancerIP }}
+  loadBalancerIP: {{ $svc.loadBalancerIP }}
+  {{- end }}
+  {{- if $svc.loadBalancerClass }}
+  loadBalancerClass: {{ $svc.loadBalancerClass }}
+  {{- end }}
+  {{- if and (eq $svc.type "LoadBalancer") $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ $svc.externalTrafficPolicy }}
+  {{- end }}
+  selector:
+    {{- include "homedns.selectorLabels" $ | nindent 4 }}
+  ports:
+  - name: dns-{{ $proto }}
+    port: {{ $svc.port }}
+    targetPort: dns-{{ $proto }}
+    protocol: {{ $proto | upper }}
+---
+{{- end }}
+{{- else }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type }}
+  {{- if $svc.loadBalancerIP }}
+  loadBalancerIP: {{ $svc.loadBalancerIP }}
+  {{- end }}
+  {{- if $svc.loadBalancerClass }}
+  loadBalancerClass: {{ $svc.loadBalancerClass }}
+  {{- end }}
+  {{- if and (eq $svc.type "LoadBalancer") $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ $svc.externalTrafficPolicy }}
+  {{- end }}
+  selector:
+    {{- include "homedns.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: dns-udp
+    port: {{ $svc.port }}
+    targetPort: dns-udp
+    protocol: UDP
+  - name: dns-tcp
+    port: {{ $svc.port }}
+    targetPort: dns-tcp
+    protocol: TCP
+{{- end }}
+{{- if .Values.metrics.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-metrics" $fullname }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+  {{- with .Values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "homedns.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: metrics
+    port: {{ .Values.metrics.port }}
+    targetPort: metrics
+    protocol: TCP
+{{- end }}
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "homedns.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: metrics
+    interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
