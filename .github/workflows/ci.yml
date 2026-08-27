@@ -5,12 +5,22 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+    inputs:
+      skip_image:
+        # Release builds and pushes the real image right after this gate, with
+        # the version ldflags baked in. Building a throwaway one first is the
+        # same multi-arch Go compile twice for no extra signal.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Scoped by workflow, not just ref: Release calls this workflow, and a push to
+  # main must not cancel the CI job inside an in-flight release from the same ref.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -100,6 +110,8 @@ jobs:
 
   image:
     name: Image
+    # Null on push/pull_request, so this only ever skips for a caller that asked.
+    if: ${{ !inputs.skip_image }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

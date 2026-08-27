@@ -218,15 +218,21 @@ PVC.
 
 ## Releases
 
-`release.yml` publishes on a `v*` tag, or on demand via `workflow_dispatch`.
-Never on a branch push. `ci.yml` builds the multi-arch image on every PR with
-`push: false`, so the build is proven without publishing.
+`release.yml` publishes on a **bare SemVer tag** — `0.2.0`, not `v0.2.0` — or on
+demand via `workflow_dispatch`. Never on a branch push. `ci.yml` builds the
+multi-arch image on every PR with `push: false`, so the build is proven without
+publishing.
+
+Both paths run `ci.yml` first, via the `workflow_call` trigger, with
+`skip_image: true` — the release builds the real image with the version ldflags
+seconds later, so a throwaway one first is the same multi-arch Go compile twice
+for no extra signal.
 
 Manual publish, from any branch or commit:
 
 ```console
 gh workflow run release.yml --ref my-branch
-gh workflow run release.yml --ref my-branch -f version=1.5.0-test.1 -f chart=false
+gh workflow run release.yml --ref my-branch -f version=1.5.0-test.1
 ```
 
 With no `version` input it derives `0.0.0-dev.<short-sha>`. The version is
@@ -234,16 +240,21 @@ validated against SemVer **before** anything is pushed — `helm package` would
 reject a bad one only after the image was already published, which is the wrong
 order to fail in.
 
-Two things to preserve if you touch this:
+Three things to preserve if you touch this:
 
 - **The version is a job output** (`needs.image.outputs.version`), resolved once
   in the `image` job. It used to be parsed from `refs/tags/v*` in both jobs,
   which silently produces garbage on a branch ref.
 - **`:latest` is gated explicitly** to a non-prerelease tag push, not
   `latest=auto`. A manual dev build must never be able to claim it.
+- **CI is a gate, not a suggestion.** Don't add a publish path that skips the
+  `ci` job. A tag push matches none of `ci.yml`'s own triggers, so without the
+  gate the one run that publishes is the only one that never ran the tests.
 
-A tag additionally pushes `:X.Y.Z` and `:X.Y`; every run pushes `sha-<full>`,
-signs the digest with cosign, attaches an SBOM, and pushes the chart at the same
+The chart is not optional: image and chart carry the same version, and a run
+that published one without the other leaves the pair inconsistent. A tag
+additionally pushes `:X.Y.Z` and `:X.Y`; every run pushes `sha-<full>`, signs
+the digest with cosign, attaches an SBOM, and pushes the chart at the same
 version to `oci://ghcr.io/<owner>/charts`.
 
 ## Upstream tracking

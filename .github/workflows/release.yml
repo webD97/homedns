@@ -1,25 +1,28 @@
 name: Release
 
-# Tags publish automatically. Everything else is opt-in: run this workflow by
-# hand (Actions tab, or `gh workflow run release.yml --ref <branch>`) to push a
-# build from any commit. CI builds the image on every PR but never pushes it.
+# Bare SemVer tags publish automatically (0.2.0, not v0.2.0). Everything else is
+# opt-in: run this workflow by hand (Actions tab, or `gh workflow run
+# release.yml --ref <branch>`) to push a build from any commit. CI builds the
+# image on every PR but never pushes it.
 on:
   push:
-    tags: ['v*']
+    tags: ['[0-9]*']
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to publish. Must be SemVer. Default: 0.0.0-dev.<short-sha>'
         required: false
         default: ''
-      chart:
-        description: 'Also package and push the Helm chart'
-        type: boolean
-        required: false
-        default: true
 
 permissions:
   contents: read
+
+concurrency:
+  # Never cancel a publish in flight: the image can already be pushed while the
+  # chart is not. Queue instead. Distinct from the group ci.yml uses when this
+  # workflow calls it, or the child would wait on its own parent.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -27,8 +30,16 @@ env:
   CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
+  # A tag push doesn't match ci.yml's own triggers, so without this the one run
+  # that publishes is the only one that never ran the tests.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      skip_image: true
+
   image:
     name: Image
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,8 +65,9 @@ jobs:
           set -euo pipefail
           echo "coredns=$(go list -m -f '{{.Version}}' github.com/coredns/coredns)" >> "$GITHUB_OUTPUT"
 
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            version="${GITHUB_REF#refs/tags/v}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+            version="${version#v}"   # tags are bare, but a v-prefixed one still works
           elif [[ -n "${INPUT_VERSION}" ]]; then
             version="${INPUT_VERSION#v}"
           else
@@ -94,7 +106,7 @@ jobs:
           # Explicit rather than latest=auto: :latest moves only for a
           # non-prerelease tag push, so no manual dev build can ever claim it.
           flavor: |
-            latest=${{ github.event_name == 'push' && !contains(steps.v.outputs.version, '-') }}
+            latest=${{ startsWith(github.ref, 'refs/tags/') && !contains(steps.v.outputs.version, '-') }}
 
       - uses: docker/build-push-action@v7
         id: build
@@ -124,10 +136,11 @@ jobs:
           IMAGE: ${{ env.IMAGE }}
           DIGEST: ${{ steps.build.outputs.digest }}
 
+  # Unconditional: the chart and the image carry the same version, so a run that
+  # published one without the other would leave the pair inconsistent.
   chart:
     name: Chart
     needs: image
-    if: github.event_name == 'push' || inputs.chart
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -140,13 +153,14 @@ jobs:
       - name: Package and push
         env:
           VERSION: ${{ needs.image.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           helm package charts/homedns \
             --version "$VERSION" \
             --app-version "$VERSION" \
             --destination /tmp/chart
-          echo "${{ secrets.GITHUB_TOKEN }}" \
+          echo "$GH_TOKEN" \
             | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm push "/tmp/chart/homedns-${VERSION}.tgz" "${CHART_REPO}"
 

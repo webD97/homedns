@@ -131,16 +131,18 @@ test, rendering the chart, booting the real binary against the Corefile the char
 generates, and a multi-arch image build. A breaking upstream change shows up as a
 red PR.
 
-Images and charts are published from `v*` tags — there is no `:main` or automatic
-per-commit tag. Every PR still builds the multi-arch image, it just isn't pushed.
-To publish a build from an arbitrary commit, run the release workflow by hand:
+Images and charts are published together from a bare SemVer tag — `0.2.0`, not
+`v0.2.0` — with no `:main` or automatic per-commit tag. Every PR still builds the
+multi-arch image, it just isn't pushed. To publish a build from an arbitrary
+commit, run the release workflow by hand:
 
 ```console
 gh workflow run release.yml --ref my-branch            # 0.0.0-dev.<sha>
 gh workflow run release.yml --ref my-branch -f version=1.5.0-test.1
 ```
 
-Manual builds never move `:latest`.
+Either way the release reruns CI before it pushes anything, and manual builds
+never move `:latest`.
 
 A second scheduled workflow re-parses the live blocklists and checks the result against
 the entry count each publisher declares in its own header. A format change is otherwise
