@@ -24,10 +24,11 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# No IMAGE/CHART_REPO here on purpose: both would bake in github.repository,
+# which preserves the account's casing, and a registry reference must be
+# lowercase. The lowercase forms are minted in Resolve versions below.
 env:
   REGISTRY: ghcr.io
-  IMAGE: ghcr.io/${{ github.repository }}
-  CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
   # A tag push doesn't match ci.yml's own triggers, so without this the one run
@@ -48,6 +49,8 @@ jobs:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       version: ${{ steps.v.outputs.version }}
+      image: ${{ steps.v.outputs.image }}
+      chart_repo: ${{ steps.v.outputs.chart_repo }}
     steps:
       - uses: actions/checkout@v7
 
@@ -64,6 +67,15 @@ jobs:
         run: |
           set -euo pipefail
           echo "coredns=$(go list -m -f '{{.Version}}' github.com/coredns/coredns)" >> "$GITHUB_OUTPUT"
+
+          # GHCR rejects any reference with an uppercase character. Actions
+          # expressions have no lower(), so the single lowercase form is minted
+          # here in bash and threaded through the job outputs. metadata-action
+          # lowercases its own images input, which is what made this asymmetry
+          # easy to miss: the push succeeded while every later step that reused
+          # the raw name -- syft, cosign, helm push -- got an unparseable ref.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "chart_repo=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" >> "$GITHUB_OUTPUT"
 
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             version="${GITHUB_REF#refs/tags/}"
@@ -95,7 +107,7 @@ jobs:
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ${{ env.IMAGE }}
+          images: ${{ steps.v.outputs.image }}
           # The semver patterns only fire on a tag push; type=raw carries the
           # resolved version for a manual run.
           tags: |
@@ -125,7 +137,7 @@ jobs:
 
       - uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          image: ${{ steps.v.outputs.image }}@${{ steps.build.outputs.digest }}
           artifact-name: homedns-sbom.spdx.json
 
       - uses: sigstore/cosign-installer@v4.1.2
@@ -133,7 +145,7 @@ jobs:
       - name: Sign
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
         env:
-          IMAGE: ${{ env.IMAGE }}
+          IMAGE: ${{ steps.v.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
 
   # Unconditional: the chart and the image carry the same version, so a run that
@@ -153,6 +165,7 @@ jobs:
       - name: Package and push
         env:
           VERSION: ${{ needs.image.outputs.version }}
+          CHART_REPO: ${{ needs.image.outputs.chart_repo }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -167,6 +180,8 @@ jobs:
       - name: Summary
         env:
           VERSION: ${{ needs.image.outputs.version }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          CHART_REPO: ${{ needs.image.outputs.chart_repo }}
         run: |
           {
             echo "### homedns $VERSION"
