@@ -8,6 +8,8 @@ imagePullSecrets: []
 # Two replicas so a rolling update never leaves the network without DNS.
 replicaCount: 2
 
+strategy: {}
+
 nameOverride: ""
 fullnameOverride: ""
 
