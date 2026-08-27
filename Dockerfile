@@ -4,9 +4,16 @@ FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 
 WORKDIR /src
 
-# Dependencies first: the CoreDNS module graph is large.
+# Dependencies first: the CoreDNS module graph is large (221 modules, 240MB of
+# zips). Deliberately no --mount=type=cache: a cache mount lives on the builder
+# and is never carried by cache-from/cache-to, so on a fresh CI runner it is
+# empty while this layer is still a cache hit -- the RUN never executes, and the
+# build below then re-downloads the entire graph on every single run, over a
+# proxy that only has to flake once to fail a release. Baking the modules into
+# the layer instead means the layer cache restores them, and this stays the only
+# step in the build that touches the network at all.
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
+RUN go mod download
 
 COPY . .
 
@@ -15,9 +22,12 @@ ARG TARGETARCH
 ARG VERSION=dev
 ARG REVISION=""
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+# GOPROXY=off keeps this step hermetic: if the layer above ever stops covering
+# what the build needs, it fails here with "module lookup disabled" instead of
+# quietly going back to the proxy. The build cache mount stays -- unlike the
+# module cache it only ever costs time, never correctness.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOPROXY=off \
     go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
       -o /out/homedns .
