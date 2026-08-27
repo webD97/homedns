@@ -6,13 +6,13 @@ name: Release
 # image on every PR but never pushes it.
 on:
   push:
-    tags: ['[0-9]*']
+    tags: ["[0-9]*"]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish. Must be SemVer. Default: 0.0.0-dev.<short-sha>'
+        description: "Version to publish. Must be SemVer. Default: 0.0.0-dev.<short-sha>"
         required: false
-        default: ''
+        default: ""
 
 permissions:
   contents: read
@@ -128,7 +128,7 @@ jobs:
           image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           artifact-name: homedns-sbom.spdx.json
 
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
