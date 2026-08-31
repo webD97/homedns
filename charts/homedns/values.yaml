@@ -67,6 +67,16 @@ cache:
   enabled: true
   ttl: 300
 
+# Ask the other replicas before waiting on the upstream. Each replica has its
+# own cache, and externalTrafficPolicy: Local pins clients to a node, so the
+# caches diverge; this races siblings against the upstream and takes whichever
+# answers first. Needs replicaCount > 1 to do anything, and grants the pod a
+# namespaced pods list/watch to find its siblings.
+peerCache:
+  enabled: false
+  # Sibling probes. Bound on the pod IP, exposed by no Service.
+  port: 8053
+
 # Static LAN records, inlined into the Corefile — no extra file or volume.
 #   - ip: 10.0.0.5
 #     names: [nas.home.example, files.home.example]

@@ -8,6 +8,9 @@ require (
 	github.com/k8s-gateway/k8s_gateway v1.8.2
 	github.com/miekg/dns v1.1.72
 	github.com/prometheus/client_golang v1.24.1
+	k8s.io/api v0.36.2
+	k8s.io/apimachinery v0.36.2
+	k8s.io/client-go v0.36.2
 )
 
 require (
@@ -212,10 +215,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.36.2 // indirect
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
-	k8s.io/apimachinery v0.36.2 // indirect
-	k8s.io/client-go v0.36.2 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260501160325-927ab1f70cd6 // indirect
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5 // indirect

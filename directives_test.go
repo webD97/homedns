@@ -21,6 +21,7 @@ func indexOf(t *testing.T, name string) int {
 func TestDirectiveOrder(t *testing.T) {
 	blocklist := indexOf(t, blocklistDirective)
 	gateway := indexOf(t, gatewayDirective)
+	peercache := indexOf(t, peercacheDirective)
 
 	// Blocking must precede cache, so a refreshed list applies immediately and
 	// no blocked name is ever forwarded upstream.
@@ -39,10 +40,24 @@ func TestDirectiveOrder(t *testing.T) {
 	if kubernetes := indexOf(t, "kubernetes"); gateway >= kubernetes {
 		t.Errorf("k8s_gateway must come before kubernetes, got k8s_gateway=%d kubernetes=%d", gateway, kubernetes)
 	}
+
+	// peercache races the upstream, so it must sit directly in front of it and
+	// below cache: every query that reaches it is already a local miss.
+	if forward := indexOf(t, "forward"); peercache >= forward {
+		t.Errorf("peercache must come before forward, got peercache=%d forward=%d", peercache, forward)
+	}
+
+	// Below hosts and k8s_gateway too, so names this cluster answers itself are
+	// never fanned out to siblings that hold the same data.
+	for _, above := range []string{"cache", "hosts", gatewayDirective, "loop"} {
+		if i := indexOf(t, above); i >= peercache {
+			t.Errorf("peercache must come after %s, got %s=%d peercache=%d", above, above, i, peercache)
+		}
+	}
 }
 
 func TestDirectivesAppearExactlyOnce(t *testing.T) {
-	for _, name := range []string{blocklistDirective, gatewayDirective} {
+	for _, name := range []string{blocklistDirective, gatewayDirective, peercacheDirective} {
 		var n int
 		for _, d := range dnsserver.Directives {
 			if d == name {

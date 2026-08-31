@@ -12,6 +12,7 @@ in-cluster with a LoadBalancer on :53.
 Two features, very different in weight:
 
 - **`plugin/blocklist/`** — written here. This is where the work is.
+- **`plugin/peercache/`** — written here. Off by default in the chart.
 - **Gateway API** — a dependency on `github.com/k8s-gateway/k8s_gateway`, not
   our code. Configuration lives in the chart. Don't reimplement it; if something
   is missing, check whether upstream already supports it.
@@ -30,10 +31,11 @@ three upstream facts, all worth re-checking if a bump breaks:
    Corefile-parse time rather than captured at init. That is what makes
    mutating it from `package main`'s `init()` safe.
 
-`directives.go` splices `blocklist` before `cache` and `k8s_gateway` before
-`kubernetes`. `insertBefore` **panics on a missing anchor** — deliberate: a
-blocklist that silently runs after `cache` is the kind of bug nobody notices, so
-an upstream reorder must fail the CoreDNS bump PR instead.
+`directives.go` splices `blocklist` before `cache`, `k8s_gateway` before
+`kubernetes`, and `peercache` before `forward`. `insertBefore` **panics on a
+missing anchor** — deliberate: a blocklist that silently runs after `cache` is
+the kind of bug nobody notices, so an upstream reorder must fail the CoreDNS
+bump PR instead.
 
 Placement reasoning, if you ever move them:
 
@@ -42,6 +44,10 @@ Placement reasoning, if you ever move them:
 - `blocklist` after `prometheus`/`log`/`errors` — blocked queries still get
   counted and logged.
 - `blocklist` before `hosts` — the integration test depends on this; see below.
+- `peercache` before `forward`, after `cache`/`hosts`/`k8s_gateway` — it races
+  the upstream, so every query reaching it must already be a local miss that
+  nothing in the cluster can answer. Asking a sibling for a name `hosts` or
+  `k8s_gateway` holds identically is pure waste.
 
 ## blocklist: decisions that look arbitrary but aren't
 
@@ -86,6 +92,65 @@ list). One dead URL must not disable filtering.
 **Metrics are aggregates only.** No per-domain or per-client labels — Pi-hole's
 "top 10 clients" panel would mean unbounded cardinality. This was an explicit
 decision; don't add label dimensions without raising it.
+
+## peercache: the two decisions everything else follows from
+
+**The probe listener is off the plugin chain, on its own port.** It would have
+been less code to answer sibling probes on `:53` and read them out of the stock
+`cache`. That was rejected, and both reasons matter:
+
+- Probes on `:53` traverse `prometheus`, `log` and `blocklist` before reaching
+  `cache`, and nothing distinguishes them from client queries. A busy replica
+  would permanently inflate its sibling's `coredns_dns_requests_total`, drag its
+  latency percentiles toward zero (probes answer in microseconds), and *deflate
+  the blocked share* — the Pi-hole headline number — because a probe is always
+  an allowed query at the receiver. Six dashboard panels would have needed
+  subtraction terms forever.
+- A chain-attached probe handler can forward. Two replicas pointed at each other
+  then bounce `loop`'s startup HINFO probe back and forth, and on the third pass
+  `plugin/loop` calls **`log.Fatalf`** and kills the pod. The off-chain listener
+  has no `Next` and structurally cannot relay, so the loop cannot exist. There
+  is a test asserting the chain is never entered; keep it.
+
+**The probe store is not a second resolver cache.** The stock `cache` plugin
+still serves every client query. `peercache`'s store exists only to answer
+siblings, which is why it can be dumb: `DO` and `CD` queries are neither stored
+nor served, sidestepping the DNSSEC and RFC 6840 5.7-5.8 AD-bit handling that
+makes the stock cache ~1200 lines. That is safe precisely because a store miss
+costs nothing — the upstream leg is racing regardless. Don't grow this into a
+cache; if it needs prefetch or serve-stale, the answer is that the stock plugin
+already has them.
+
+**Entries below 5s remaining are dropped, not served.** Otherwise a hot name
+ping-pongs between replicas at an ever-shrinking TTL and never gets refreshed.
+
+**The losing leg must not hold the live ResponseWriter.** When a peer wins,
+`ServeDNS` returns while the upstream leg is still running; the server may
+cancel the context and reuse the connection at that moment.
+`plugin/pkg/nonwriter` embeds the real writer, so it is *not* safe here —
+`detachedWriter` delegates nothing and answers `LocalAddr`/`RemoteAddr` from
+values snapshotted before the goroutines launch.
+
+**Discovery is Kubernetes-only, and never fatal.** Cluster DNS cannot be used:
+the Deployment sets `dnsPolicy: Default`, so a headless Service name does not
+resolve from inside the pod. The API server is reachable anyway because
+`rest.InClusterConfig` builds its URL from `KUBERNETES_SERVICE_HOST`, never from
+a name. A missing `POD_IP`, an unreachable API server or a failed bind logs a
+warning and leaves the peer set empty — every query then takes the upstream leg
+alone, exactly as without the plugin. Same reasoning as blocklist's fail-open:
+losing DNS for the house because the API server blipped is the worse failure.
+CI depends on this too, booting the `peerCache.enabled=true` Corefile outside a
+cluster.
+
+**The listener retries its bind.** The `reload` plugin re-runs setup in place,
+so `OnStartup` can fire before the previous listener has released the port.
+Shutdown closes the `PacketConn` rather than calling `dns.Server.Shutdown`,
+which races a server that has not started serving yet.
+
+**It is a latency feature, not a traffic one.** The race always sends the
+upstream leg, so upstream QPS is unchanged. What it buys is latency and
+resilience. Anyone "optimising" this into peers-first-then-upstream is changing
+the tradeoff, not fixing a bug.
 
 ## Traps that already cost time
 
@@ -211,10 +276,10 @@ that path anyway, but it makes the dependency greppable.
 ## Statelessness
 
 No PV, and no volume beyond the Corefile ConfigMap. Blocklists live in memory
-and are re-downloaded; Gateway API records are rebuilt from informers; counters
-reset (use `increase(...[24h])` for Pi-hole-style daily totals). If you add
-anything needing disk, that is a design change — raise it rather than adding a
-PVC.
+and are re-downloaded; Gateway API records are rebuilt from informers;
+`peercache`'s probe store is memory-only and simply starts empty; counters reset
+(use `increase(...[24h])` for Pi-hole-style daily totals). If you add anything
+needing disk, that is a design change — raise it rather than adding a PVC.
 
 ## Releases
 

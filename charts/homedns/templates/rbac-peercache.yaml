@@ -1,0 +1,31 @@
+{{- if .Values.peerCache.enabled }}
+{{- /* Namespaced, and separate from rbac.yaml because that file is gated on
+gatewayAPI. peercache needs siblings' pod IPs, and cluster DNS cannot supply
+them: the pod runs with dnsPolicy: Default, so a headless Service name does not
+resolve from inside it. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-peercache" (include "homedns.fullname" .) }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-peercache" (include "homedns.fullname" .) }}
+  labels:
+    {{- include "homedns.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-peercache" (include "homedns.fullname" .) }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "homedns.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -59,6 +59,20 @@ spec:
           containerPort: {{ .Values.metrics.port }}
           protocol: TCP
         {{- end }}
+        {{- if .Values.peerCache.enabled }}
+        - name: peer-probe
+          containerPort: {{ .Values.peerCache.port }}
+          protocol: UDP
+        {{- end }}
+        {{- if .Values.peerCache.enabled }}
+        env:
+        # peercache binds its probe listener here and uses it to leave itself
+        # out of its own peer set.
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        {{- end }}
         livenessProbe:
           httpGet:
             path: /health

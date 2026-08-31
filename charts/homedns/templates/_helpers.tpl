@@ -57,6 +57,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end }}
 
+{{/* The pod selector peercache discovers siblings with. Kept in step with
+selectorLabels by construction: these are the labels the Deployment selects on. */}}
+{{- define "homedns.peerSelector" -}}
+app.kubernetes.io/name={{ include "homedns.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+
 {{/* Plugin order here is irrelevant; CoreDNS orders the chain itself. */}}
 {{- define "homedns.corefile" -}}
 {{- if .Values.corefile -}}
@@ -116,6 +122,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.cache.enabled }}
 
     cache {{ .Values.cache.ttl }}
+{{- end }}
+
+{{- if .Values.peerCache.enabled }}
+
+    peercache {
+        selector {{ include "homedns.peerSelector" . }}
+        port {{ .Values.peerCache.port }}
+    }
 {{- end }}
 
     forward . {{ join " " .Values.upstream.servers }}{{ if .Values.upstream.tlsServername }} {

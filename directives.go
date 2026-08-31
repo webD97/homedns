@@ -10,11 +10,13 @@ import (
 const (
 	blocklistDirective = "blocklist"
 	gatewayDirective   = "k8s_gateway"
+	peercacheDirective = "peercache"
 )
 
 func init() {
 	insertBefore("cache", blocklistDirective)
 	insertBefore("kubernetes", gatewayDirective)
+	insertBefore("forward", peercacheDirective)
 }
 
 // insertBefore splices name into dnsserver.Directives directly before anchor.

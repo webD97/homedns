@@ -8,3 +8,12 @@
 {{- if and .Values.blocklist.enabled .Values.blocklist.urls (not .Values.blocklist.bootstrapDNS) }}
 {{- fail "blocklist.bootstrapDNS must name at least one resolver IP: this server cannot resolve its own blocklist URLs, and cluster DNS may forward back to it" }}
 {{- end }}
+{{- if and .Values.peerCache.enabled (not .Values.cache.enabled) }}
+{{- fail "peerCache.enabled requires cache.enabled: peercache races siblings on a local cache miss, and with no cache there is nothing to miss, nothing for a sibling to hold, and nothing to keep the answer it wins" }}
+{{- end }}
+{{- if and .Values.peerCache.enabled (eq (int .Values.peerCache.port) (int .Values.service.port)) }}
+{{- fail "peerCache.port must differ from service.port" }}
+{{- end }}
+{{- if and .Values.peerCache.enabled .Values.metrics.enabled (eq (int .Values.peerCache.port) (int .Values.metrics.port)) }}
+{{- fail "peerCache.port must differ from metrics.port" }}
+{{- end }}

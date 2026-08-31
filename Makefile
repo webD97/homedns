@@ -76,6 +76,7 @@ chart-lint: ## Lint and render the Helm chart
 	helm template homedns $(CHART) $(CHART_ZONES) >/dev/null
 	helm template homedns $(CHART) $(CHART_ZONES) --set service.splitTcpUdp=true >/dev/null
 	helm template homedns $(CHART) --set gatewayAPI.enabled=false >/dev/null
+	helm template homedns $(CHART) $(CHART_ZONES) --set peerCache.enabled=true >/dev/null
 
 .PHONY: coredns-version
 coredns-version: ## Print the CoreDNS version this build embeds

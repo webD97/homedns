@@ -11,6 +11,10 @@ It replaces three things that usually run side by side:
 | external-dns | [`k8s_gateway`](https://github.com/k8s-gateway/k8s_gateway) — reads Gateway API resources directly instead of pushing records to a provider |
 | a standalone CoreDNS | the same binary; every stock CoreDNS plugin is still available |
 
+Plus one thing nothing else here does: the optional
+[`peercache`](plugin/peercache/) plugin lets the replicas ask each other before waiting on
+the upstream, so a name one replica has already resolved is fast on all of them.
+
 The result is one DNS server for the LAN: a filtering forwarder that also answers for
 hostnames declared by `HTTPRoute` resources in the cluster.
 
@@ -43,6 +47,7 @@ No PersistentVolume, and no volume at all beyond the Corefile ConfigMap.
 | Gateway API records | k8s informers | rebuilt from the API server in seconds |
 | Blocklist domains | memory | re-downloaded |
 | DNS cache | memory | discarded |
+| Peer probe store | memory | discarded |
 | Prometheus counters | memory | reset — use `increase(...[24h])` for Pi-hole-style daily totals |
 
 Being PV-free means a fresh pod starts with no blocklist. The `blocklist` plugin therefore
@@ -77,6 +82,9 @@ hosts:                           # static LAN records, inlined into the Corefile
 upstream:
   servers: [tls://1.1.1.1, tls://1.0.0.1]
   tlsServername: cloudflare-dns.com
+
+peerCache:
+  enabled: true                  # ask the other replicas before the upstream
 ```
 
 A `Service` carrying both TCP and UDP on :53 is the default and works on Kubernetes 1.26+
@@ -93,6 +101,7 @@ Pi-hole's headline numbers, on the standard CoreDNS metrics endpoint:
 | blocked | `coredns_blocklist_blocked_total` |
 | domains on the blocklist | `coredns_blocklist_domains_total` |
 | % blocked | `blocked_total / (blocked_total + allowed_total)` |
+| answers taken from a sibling | `coredns_peercache_wins_total{source="peer"}` |
 
 Full list and suggested alerts: [`plugin/blocklist/README.md`](plugin/blocklist/README.md).
 
