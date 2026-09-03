@@ -51,7 +51,7 @@
                         "editorMode": "code",
                         "expr": "sum(rate(coredns_dns_requests_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
-                        "legendFormat": "qps",
+                        "legendFormat": "qpm",
                         "range": true
                       },
                       "version": "v0"
@@ -67,7 +67,7 @@
           "description": "Every query reaching the server, all zones and protocols.",
           "id": 1,
           "links": [],
-          "title": "Queries/s",
+          "title": "Queries/min",
           "vizConfig": {
             "group": "stat",
             "kind": "VizConfig",
@@ -133,7 +133,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (to, rcode) (rate(coredns_proxy_request_duration_seconds_count{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum by (to, rcode) (rate(coredns_proxy_request_duration_seconds_count{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "{{to}} {{rcode}}",
                         "range": true
@@ -155,7 +155,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (to) (rate(coredns_proxy_healthcheck_failures_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum by (to) (rate(coredns_proxy_healthcheck_failures_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "healthcheck failed {{to}}",
                         "range": true
@@ -177,7 +177,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(rate(coredns_forward_healthcheck_broken_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum(rate(coredns_forward_healthcheck_broken_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "all upstreams down",
                         "range": true
@@ -249,7 +249,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": []
               },
@@ -564,7 +564,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(rate(coredns_blocklist_blocked_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum(rate(coredns_blocklist_blocked_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "blocked",
                         "range": true
@@ -586,7 +586,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(rate(coredns_blocklist_allowed_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum(rate(coredns_blocklist_allowed_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "passed",
                         "range": true
@@ -658,7 +658,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": [
                   {
@@ -1691,7 +1691,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (source) (rate(coredns_peercache_wins_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum by (source) (rate(coredns_peercache_wins_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "{{source}}",
                         "range": true
@@ -1767,7 +1767,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": [
                   {
@@ -2015,7 +2015,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (reason) (rate(coredns_peercache_probe_failures_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum by (reason) (rate(coredns_peercache_probe_failures_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "failed {{reason}}",
                         "range": true
@@ -2091,7 +2091,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": [
                   {
@@ -2263,7 +2263,7 @@
           "description": "Usually upstream trouble. NXDOMAIN is excluded — the blocklist makes that the normal case.",
           "id": 4,
           "links": [],
-          "title": "SERVFAIL/s",
+          "title": "SERVFAIL/min",
           "vizConfig": {
             "group": "stat",
             "kind": "VizConfig",
@@ -2336,7 +2336,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (type) (rate(coredns_dns_requests_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum by (type) (rate(coredns_dns_requests_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "{{type}}",
                         "range": true
@@ -2408,7 +2408,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": []
               },
@@ -2449,7 +2449,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (rcode) (rate(coredns_dns_responses_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum by (rcode) (rate(coredns_dns_responses_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "{{rcode}}",
                         "range": true
@@ -2521,7 +2521,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": []
               },
@@ -2719,7 +2719,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(rate(coredns_cache_hits_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "sum(rate(coredns_cache_hits_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
                         "legendFormat": "hits",
                         "range": true
@@ -2741,7 +2741,7 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(rate(coredns_cache_requests_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))\n  - sum(rate(coredns_cache_hits_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))",
+                        "expr": "(\n  sum(rate(coredns_cache_requests_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))\n    - sum(rate(coredns_cache_hits_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))\n)*60",
                         "instant": false,
                         "legendFormat": "misses",
                         "range": true
@@ -2839,7 +2839,7 @@
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "reqpm"
                 },
                 "overrides": [
                   {
