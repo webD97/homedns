@@ -133,58 +133,14 @@
                       "kind": "DataQuery",
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (to, rcode) (rate(coredns_proxy_request_duration_seconds_count{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
+                        "expr": "sum by (rcode) (rate(coredns_proxy_request_duration_seconds_count{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
                         "instant": false,
-                        "legendFormat": "{{to}} {{rcode}}",
+                        "legendFormat": "{{rcode}}",
                         "range": true
                       },
                       "version": "v0"
                     },
                     "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "${datasource}"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "expr": "sum by (to) (rate(coredns_proxy_healthcheck_failures_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
-                        "instant": false,
-                        "legendFormat": "healthcheck failed {{to}}",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "B"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "${datasource}"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "expr": "sum(rate(coredns_forward_healthcheck_broken_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
-                        "instant": false,
-                        "legendFormat": "all upstreams down",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "C"
                   }
                 }
               ],
@@ -192,10 +148,10 @@
               "transformations": []
             }
           },
-          "description": "Forwarded query outcomes plus upstream health. 'all upstreams down' above zero means the forward plugin found no healthy target. With the race plugin enabled every upstream gets every query, so this counts N times the client query volume.",
+          "description": "Rcodes coming back from the upstreams, counted per leg: race sends every query to every server, so this is N x the client query rate by design. Which server answered first is panel \"Race wins by upstream\"; a server failing is \"Race leg failures and retries\".",
           "id": 10,
           "links": [],
-          "title": "Upstream queries by result",
+          "title": "Upstream responses by rcode",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -1666,151 +1622,6 @@
                 "showPercentChange": false,
                 "textMode": "auto",
                 "wideLayout": true
-              }
-            },
-            "version": "13.2.0"
-          }
-        }
-      },
-      "panel-23": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "${datasource}"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "editorMode": "code",
-                        "expr": "sum by (source) (rate(coredns_peercache_wins_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
-                        "instant": false,
-                        "legendFormat": "{{source}}",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Which leg answered first. The upstream leg is always sent, so this is a latency win, not a traffic saving.",
-          "id": 23,
-          "links": [],
-          "title": "Race wins by source",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic",
-                    "seriesBy": "max"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "axisSoftMin": 0,
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.9,
-                    "drawStyle": "line",
-                    "fillOpacity": 0,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "linear",
-                    "lineStyle": {
-                      "fill": "solid"
-                    },
-                    "lineWidth": 1,
-                    "pointSize": 1,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "always",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      }
-                    ]
-                  },
-                  "unit": "reqpm"
-                },
-                "overrides": [
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "entries"
-                    },
-                    "properties": [
-                      {
-                        "id": "custom.axisPlacement",
-                        "value": "right"
-                      },
-                      {
-                        "id": "unit",
-                        "value": "short"
-                      },
-                      {
-                        "id": "custom.fillOpacity",
-                        "value": 0
-                      },
-                      {
-                        "id": "color",
-                        "value": {
-                          "fixedColor": "text",
-                          "mode": "fixed"
-                        }
-                      }
-                    ]
-                  }
-                ]
-              },
-              "options": {
-                "legend": {
-                  "calcs": [],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               }
             },
             "version": "13.2.0"
@@ -3860,24 +3671,11 @@
                       "spec": {
                         "element": {
                           "kind": "ElementReference",
-                          "name": "panel-23"
-                        },
-                        "height": 8,
-                        "width": 8,
-                        "x": 0,
-                        "y": 0
-                      }
-                    },
-                    {
-                      "kind": "GridLayoutItem",
-                      "spec": {
-                        "element": {
-                          "kind": "ElementReference",
                           "name": "panel-24"
                         },
                         "height": 8,
-                        "width": 8,
-                        "x": 8,
+                        "width": 12,
+                        "x": 0,
                         "y": 0
                       }
                     },
@@ -3889,8 +3687,8 @@
                           "name": "panel-25"
                         },
                         "height": 8,
-                        "width": 8,
-                        "x": 16,
+                        "width": 12,
+                        "x": 12,
                         "y": 0
                       }
                     }
