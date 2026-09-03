@@ -67,6 +67,17 @@ cache:
   enabled: true
   ttl: 300
 
+# Send every cache miss to all of upstream.servers at once and answer with the
+# first useful reply, instead of forward's random pick of one. Measured against
+# the two Quad9 anycast addresses their tails are independent, so the slow one
+# stops deciding client latency; see plugin/race/README.md. This multiplies
+# upstream query volume by the number of servers, which is the trade.
+race:
+  enabled: false
+  # Idle upstream connections are dropped after this long. Three times CoreDNS's
+  # own default, because a warm connection is one fewer handshake in the tail.
+  expire: 30s
+
 # Ask the other replicas before waiting on the upstream. Each replica has its
 # own cache, and externalTrafficPolicy: Local pins clients to a node, so the
 # caches diverge; this races siblings against the upstream and takes whichever

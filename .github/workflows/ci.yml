@@ -86,6 +86,9 @@ jobs:
           helm template homedns charts/homedns \
             --set gatewayAPI.zones={home.example.com} \
             --set peerCache.enabled=true > /dev/null
+          helm template homedns charts/homedns \
+            --set gatewayAPI.zones={home.example.com} \
+            --set race.enabled=true > /dev/null
 
       # The chart's job is producing a valid Corefile, so check the real binary
       # accepts the one it generates.
@@ -103,6 +106,7 @@ jobs:
             --set metrics.port=9154 \
             --set blocklist.enabled=false \
             --set peerCache.enabled=true \
+            --set race.enabled=true \
             | python3 -c "import sys,yaml;[print(d['data']['Corefile']) for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind')=='ConfigMap']" \
             > /tmp/Corefile
           cat /tmp/Corefile

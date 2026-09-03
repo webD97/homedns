@@ -260,3 +260,94 @@ func waitUntil(t *testing.T, timeout time.Duration, msg string, cond func() bool
 	}
 	t.Fatal(msg)
 }
+
+// The race plugin has no external dependency, so it can be exercised for real:
+// two upstreams in this process, one deliberately slow, and the answer that
+// comes back over the wire has to be the fast one's.
+const raceCorefileTemplate = `.:{{DNS}} {
+    race . {{FAST}} {{SLOW}}
+    prometheus {{METRICS}}
+    errors
+}
+`
+
+const raceSlowDelay = 400 * time.Millisecond
+
+func TestRaceEndToEnd(t *testing.T) {
+	fast := fakeUpstream(t, 0, "10.9.0.1")
+	slow := fakeUpstream(t, raceSlowDelay, "10.9.0.2")
+
+	dnsAddr := freeAddr(t)
+	metricsAddr := freeAddr(t)
+
+	corefile := strings.NewReplacer(
+		"{{DNS}}", port(dnsAddr),
+		"{{FAST}}", fast,
+		"{{SLOW}}", slow,
+		"{{METRICS}}", metricsAddr,
+	).Replace(raceCorefileTemplate)
+
+	path := filepath.Join(t.TempDir(), "Corefile")
+	if err := os.WriteFile(path, []byte(corefile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stopServer(t, startServer(t, path))
+	waitForDNS(t, dnsAddr)
+
+	resp := query(t, dnsAddr, "allowed.example.org.")
+	if resp.Rcode != dns.RcodeSuccess {
+		t.Fatalf("rcode %s, want NOERROR", dns.RcodeToString[resp.Rcode])
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("%d answers, want 1", len(resp.Answer))
+	}
+	a, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("answer is %T, want *dns.A", resp.Answer[0])
+	}
+	if a.A.String() != "10.9.0.1" {
+		t.Errorf("got %s, want the fast upstream's 10.9.0.1", a.A)
+	}
+
+	body := get(t, "http://"+metricsAddr+"/metrics")
+	for _, want := range []string{
+		`coredns_race_wins_total{to="` + fast + `"}`,
+		`coredns_race_queries_total{result="won"}`,
+		`coredns_proxy_request_duration_seconds_count{proxy_name="race"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics is missing %q", want)
+		}
+	}
+}
+
+// fakeUpstream answers every query with addr after delay, on an ephemeral
+// loopback port.
+func fakeUpstream(t *testing.T, delay time.Duration, addr string) string {
+	t.Helper()
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(
+		func(w dns.ResponseWriter, r *dns.Msg) {
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			m := new(dns.Msg).SetReply(r)
+			m.Answer = []dns.RR{&dns.A{
+				Hdr: dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   net.ParseIP(addr),
+			}}
+			_ = w.WriteMsg(m)
+		})}
+
+	done := make(chan struct{})
+	go func() { defer close(done); _ = srv.ActivateAndServe() }()
+	t.Cleanup(func() { pc.Close(); <-done })
+
+	return pc.LocalAddr().String()
+}

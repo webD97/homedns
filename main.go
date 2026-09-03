@@ -9,6 +9,7 @@ import (
 	_ "github.com/k8s-gateway/k8s_gateway"
 	_ "github.com/webd97/homedns/plugin/blocklist"
 	_ "github.com/webd97/homedns/plugin/peercache"
+	_ "github.com/webd97/homedns/plugin/race"
 )
 
 func main() {

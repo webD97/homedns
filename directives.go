@@ -11,12 +11,16 @@ const (
 	blocklistDirective = "blocklist"
 	gatewayDirective   = "k8s_gateway"
 	peercacheDirective = "peercache"
+	raceDirective      = "race"
 )
 
 func init() {
 	insertBefore("cache", blocklistDirective)
 	insertBefore("kubernetes", gatewayDirective)
 	insertBefore("forward", peercacheDirective)
+	// After peercache, not before: the last insert before an anchor takes the
+	// slot nearest it, which puts race between peercache and forward.
+	insertBefore("forward", raceDirective)
 }
 
 // insertBefore splices name into dnsserver.Directives directly before anchor.

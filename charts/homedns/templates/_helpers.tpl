@@ -132,9 +132,20 @@ app.kubernetes.io/name={{ include "homedns.name" . }},app.kubernetes.io/instance
     }
 {{- end }}
 
+{{- if .Values.race.enabled }}
+
+    race . {{ join " " .Values.upstream.servers }} {
+{{- if .Values.upstream.tlsServername }}
+        tls_servername {{ .Values.upstream.tlsServername }}
+{{- end }}
+        expire {{ .Values.race.expire }}
+    }
+{{- else }}
+
     forward . {{ join " " .Values.upstream.servers }}{{ if .Values.upstream.tlsServername }} {
         tls_servername {{ .Values.upstream.tlsServername }}
     }{{ end }}
+{{- end }}
 
     loop
     reload

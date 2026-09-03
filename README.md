@@ -11,9 +11,11 @@ It replaces three things that usually run side by side:
 | external-dns | [`k8s_gateway`](https://github.com/k8s-gateway/k8s_gateway) — reads Gateway API resources directly instead of pushing records to a provider |
 | a standalone CoreDNS | the same binary; every stock CoreDNS plugin is still available |
 
-Plus one thing nothing else here does: the optional
+Plus two things nothing else here does, both optional. The
 [`peercache`](plugin/peercache/) plugin lets the replicas ask each other before waiting on
-the upstream, so a name one replica has already resolved is fast on all of them.
+the upstream, so a name one replica has already resolved is fast on all of them. The
+[`race`](plugin/race/) plugin sends each remaining query to every upstream at once and takes
+the first useful answer, so one slow resolver stops deciding how long the house waits.
 
 The result is one DNS server for the LAN: a filtering forwarder that also answers for
 hostnames declared by `HTTPRoute` resources in the cluster.
@@ -85,6 +87,9 @@ upstream:
 
 peerCache:
   enabled: true                  # ask the other replicas before the upstream
+
+race:
+  enabled: true                  # ask every upstream at once, take the first useful answer
 ```
 
 A `Service` carrying both TCP and UDP on :53 is the default and works on Kubernetes 1.26+
@@ -102,6 +107,7 @@ Pi-hole's headline numbers, on the standard CoreDNS metrics endpoint:
 | domains on the blocklist | `coredns_blocklist_domains_total` |
 | % blocked | `blocked_total / (blocked_total + allowed_total)` |
 | answers taken from a sibling | `coredns_peercache_wins_total{source="peer"}` |
+| which upstream answered first | `coredns_race_wins_total` |
 
 Full list and suggested alerts: [`plugin/blocklist/README.md`](plugin/blocklist/README.md).
 

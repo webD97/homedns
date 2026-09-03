@@ -17,6 +17,7 @@ import (
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
+	"github.com/webd97/homedns/internal/detached"
 )
 
 const (
@@ -92,10 +93,10 @@ func (p *PeerCache) race(ctx context.Context, w dns.ResponseWriter, r *dns.Msg, 
 	// The upstream leg outlives this function when a peer wins, so it must not
 	// hold the live ResponseWriter: the server may cancel the context and reuse
 	// the connection the moment ServeDNS returns.
-	dw := &detachedWriter{local: w.LocalAddr(), remote: w.RemoteAddr()}
+	dw := detached.New(w)
 	go func() {
 		rcode, err := plugin.NextOrFailure(p.Name(), p.Next, ctx, dw, r.Copy())
-		results <- legResult{source: sourceUpstream, msg: dw.msg, rcode: rcode, err: err}
+		results <- legResult{source: sourceUpstream, msg: dw.Msg, rcode: rcode, err: err}
 	}()
 
 	var upstream *legResult
@@ -188,20 +189,3 @@ func isTimeout(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }
-
-// detachedWriter captures a reply without delegating anything to the live
-// ResponseWriter, so a losing leg can finish after ServeDNS has returned.
-// plugin/pkg/nonwriter cannot be used here: it embeds the real writer.
-type detachedWriter struct {
-	local, remote net.Addr
-	msg           *dns.Msg
-}
-
-func (d *detachedWriter) LocalAddr() net.Addr         { return d.local }
-func (d *detachedWriter) RemoteAddr() net.Addr        { return d.remote }
-func (d *detachedWriter) WriteMsg(m *dns.Msg) error   { d.msg = m; return nil }
-func (d *detachedWriter) Write(b []byte) (int, error) { return len(b), nil }
-func (d *detachedWriter) Close() error                { return nil }
-func (d *detachedWriter) TsigStatus() error           { return nil }
-func (d *detachedWriter) TsigTimersOnly(bool)         {}
-func (d *detachedWriter) Hijack()                     {}

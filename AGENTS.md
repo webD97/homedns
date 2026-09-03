@@ -9,10 +9,12 @@ One DNS server for a home LAN, replacing Pi-hole (blocklists), external-dns
 (Gateway API), and a standalone CoreDNS (forwarding + static records). Deployed
 in-cluster with a LoadBalancer on :53.
 
-Two features, very different in weight:
+The moving parts, very different in weight:
 
 - **`plugin/blocklist/`** — written here. This is where the work is.
 - **`plugin/peercache/`** — written here. Off by default in the chart.
+- **`plugin/race/`** — written here. Off by default in the chart. Replaces
+  `forward` rather than sitting in front of it.
 - **Gateway API** — a dependency on `github.com/k8s-gateway/k8s_gateway`, not
   our code. Configuration lives in the chart. Don't reimplement it; if something
   is missing, check whether upstream already supports it.
@@ -32,8 +34,9 @@ three upstream facts, all worth re-checking if a bump breaks:
    mutating it from `package main`'s `init()` safe.
 
 `directives.go` splices `blocklist` before `cache`, `k8s_gateway` before
-`kubernetes`, and `peercache` before `forward`. `insertBefore` **panics on a
-missing anchor** — deliberate: a blocklist that silently runs after `cache` is
+`kubernetes`, and `peercache` then `race` before `forward` — in that order,
+because the last insert before an anchor takes the slot nearest it, which is
+what puts `race` between the two. `insertBefore` **panics on a missing anchor** — deliberate: a blocklist that silently runs after `cache` is
 the kind of bug nobody notices, so an upstream reorder must fail the CoreDNS
 bump PR instead.
 
@@ -48,6 +51,8 @@ Placement reasoning, if you ever move them:
   the upstream, so every query reaching it must already be a local miss that
   nothing in the cluster can answer. Asking a sibling for a name `hosts` or
   `k8s_gateway` holds identically is pure waste.
+- `race` between `peercache` and `forward` — it does `forward`'s job, so it takes
+  `forward`'s place, and `peercache`'s upstream leg is what runs through it.
 
 ## blocklist: decisions that look arbitrary but aren't
 
@@ -128,8 +133,9 @@ ping-pongs between replicas at an ever-shrinking TTL and never gets refreshed.
 `ServeDNS` returns while the upstream leg is still running; the server may
 cancel the context and reuse the connection at that moment.
 `plugin/pkg/nonwriter` embeds the real writer, so it is *not* safe here —
-`detachedWriter` delegates nothing and answers `LocalAddr`/`RemoteAddr` from
-values snapshotted before the goroutines launch.
+`internal/detached.Writer` delegates nothing and answers `LocalAddr`/`RemoteAddr`
+from values snapshotted before the goroutines launch. It lives in `internal/`
+because `race` needs the same guarantee.
 
 **Discovery is Kubernetes-only, and never fatal.** Cluster DNS cannot be used:
 the Deployment sets `dnsPolicy: Default`, so a headless Service name does not
@@ -151,6 +157,70 @@ which races a server that has not started serving yet.
 upstream leg, so upstream QPS is unchanged. What it buys is latency and
 resilience. Anyone "optimising" this into peers-first-then-upstream is changing
 the tradeoff, not fixing a bug.
+
+## race: the decisions everything else follows from
+
+**It exists because the tail belongs to *one* upstream, not to "the upstream".**
+`forward`'s default policy is `random`, so a resolver having a bad moment sets
+client latency about half the time. That is only worth fixing if the upstreams
+fail independently, and two anycast addresses of the same operator are a
+reasonable place to expect they do not — so it was measured before anything was
+written. 590 paired queries, the same name sent to both Quad9 addresses at once:
+
+| | p50 | p90 | p95 | p99 |
+| --- | --- | --- | --- | --- |
+| `9.9.9.11` | 20 ms | 39 ms | 126 ms | 635 ms |
+| `149.112.112.11` | 16 ms | 33 ms | 65 ms | 180 ms |
+| first to answer | 16 ms | 25 ms | 33 ms | 107 ms |
+
+Per-query correlation r = 0.064, and of the 17 queries where either leg exceeded
+200 ms, none were slow on both. Redo this measurement before changing the
+upstream list — it is the only thing that says whether the plugin earns its
+N-times-the-traffic cost.
+
+**Aggregate correlation is the wrong statistic, and it says the opposite.**
+Correlating the two upstreams' 10-minute slow-query *rates* out of Prometheus
+gives r = 0.73, which reads as "their tails move together, this will not help".
+That is a shared query mix — both resolvers meet the same hard names in the same
+window — not per-query dependence. It nearly killed the plugin. Only paired
+queries answer the question.
+
+**The reconnect rate is not the tail.** 32% of upstream queries miss the
+connection cache, which looks like the culprit until you notice `forward`
+already enables TLS session resumption (`forward/setup.go`), so a miss costs a
+*resumed* handshake. Mean (40 ms) against p50 (26 ms) puts it at ~30 ms on a
+third of queries: ~10 ms of mean, invisible at p99. `expire` is 30s because it
+is free, not because it fixes anything. A keepalive ticker was designed and
+dropped for the same reason — `Transport.Dial` + `Yield` refreshes a pooled
+connection with no query at all, and both are exported — but it buys mean, not
+tail, and it muddies the dial-rate metric that would justify it. Build it only
+if that panel still shows misses.
+
+**Losing legs are never cancelled.** `pkg/proxy`'s `lookupDNS` ignores its
+context entirely — the parameter is literally `_ctx` — so cancelling buys
+nothing, and a leg that runs to completion is what hands its connection back to
+the pool via `transport.Yield`. Aborting losers would close connections instead
+of reusing them, which is backwards.
+
+**Three things `pkg/proxy` will not do for you**, each silent when missed:
+`Connect` mutates `state.Req.Id`, so every leg needs its own `r.Copy()`;
+`ClientSessionCache` is set by `forward`, not by `pkg/tls` or `pkg/proxy`, so
+omitting it downgrades every reconnect to a full handshake; and `ErrCachedClosed`
+is retried by `forward.ServeDNS`, not by `Connect`, so a caller that does not
+loop on it fails a query whenever the remote closed a pooled connection.
+
+**No health checking.** `forward` skips proxies that are `Down()`; `race` asks
+all of them every time, so the query *is* the health check. `Start()` is still
+called on each proxy, but only because it also starts the transport's connection
+manager — `Healthcheck()` never is, so `up.Probe` sends no traffic.
+
+**A fast failure is slower than under `forward`**, which returns its chosen
+upstream's `SERVFAIL` at once while `race` waits to see if another does better.
+Intended, and the one path where this is a regression.
+
+**Two different races.** The `race` plugin is the upstream contest; `PeerCache.race`
+is the sibling one. With both enabled a query that misses everything generates one
+peer probe plus N upstream queries.
 
 ## Traps that already cost time
 

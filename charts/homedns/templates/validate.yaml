@@ -17,3 +17,6 @@
 {{- if and .Values.peerCache.enabled .Values.metrics.enabled (eq (int .Values.peerCache.port) (int .Values.metrics.port)) }}
 {{- fail "peerCache.port must differ from metrics.port" }}
 {{- end }}
+{{- if and .Values.race.enabled (lt (len .Values.upstream.servers) 2) }}
+{{- fail "race.enabled needs at least two upstream.servers: with one there is nothing to race, and `forward` is the plugin for that" }}
+{{- end }}
