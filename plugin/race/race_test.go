@@ -2,9 +2,13 @@ package race
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -68,6 +72,7 @@ func newRacer(t *testing.T, readTimeout time.Duration, addrs ...string) *Race {
 	for _, addr := range addrs {
 		p := proxy.NewProxy(pluginName, addr, transport.DNS)
 		p.SetReadTimeout(readTimeout)
+		p.SetMaxIdleConns(maxIdleConns)
 		rc.proxies = append(rc.proxies, p)
 	}
 	return rc
@@ -342,3 +347,87 @@ func TestUseful(t *testing.T) {
 }
 
 var _ plugin.Handler = (*Race)(nil)
+
+// hangUpUpstream answers over TCP and then closes the connection, so every
+// connection it hands back is dead by the time it is reused — the same thing a
+// public resolver does to an idle DoT connection.
+func hangUpUpstream(t *testing.T, ip string) string {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &dns.Server{Listener: l, Handler: dns.HandlerFunc(
+		func(w dns.ResponseWriter, r *dns.Msg) {
+			m := new(dns.Msg).SetReply(r)
+			m.Answer = []dns.RR{test.A("example.com. 300 IN A " + ip)}
+			_ = w.WriteMsg(m)
+			_ = w.Close()
+		})}
+
+	done := make(chan struct{})
+	go func() { defer close(done); _ = srv.ActivateAndServe() }()
+	t.Cleanup(func() { l.Close(); <-done })
+
+	return l.Addr().String()
+}
+
+// A pool full of connections the upstream has already hung up on must not fail
+// the query. This is the bug that reached production: the pool can hold more
+// dead connections than a fixed retry count, and a write to one of them fails
+// with EPIPE rather than the ErrCachedClosed that proxy.Connect names.
+func TestDeadPooledConnectionsAreDrained(t *testing.T) {
+	addr := hangUpUpstream(t, "192.0.2.1")
+	rc := newRacer(t, 2*time.Second, addr)
+	rc.opts.ForceTCP = true
+
+	// Warm the pool: each of these dials fresh, gets an answer, yields the
+	// connection back — and the server has already hung up on it.
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := new(dns.Msg).SetQuestion("example.com.", dns.TypeA)
+			_, _ = rc.ServeDNS(context.Background(), dnstest.NewRecorder(&test.ResponseWriter{}), req)
+		}()
+	}
+	wg.Wait()
+	time.Sleep(150 * time.Millisecond) // let the peer's FINs land
+
+	before := testutil.ToFloat64(staleConns.WithLabelValues(addr))
+
+	rec := dnstest.NewRecorder(&test.ResponseWriter{})
+	if _, err := query(t, rc, rec); err != nil {
+		t.Fatalf("a pool of dead connections must not fail the query: %v", err)
+	}
+	if got := answerIP(t, rec.Msg); got != "192.0.2.1" {
+		t.Errorf("answer = %s, want 192.0.2.1", got)
+	}
+	if after := testutil.ToFloat64(staleConns.WithLabelValues(addr)); after <= before {
+		t.Error("draining a dead pooled connection was not counted")
+	}
+}
+
+func TestStaleConn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"nil":              {nil, false},
+		"cached closed":    {proxy.ErrCachedClosed, true},
+		"eof":              {io.EOF, true},
+		"broken pipe":      {&net.OpError{Op: "write", Err: os.NewSyscallError("write", syscall.EPIPE)}, true},
+		"connection reset": {&net.OpError{Op: "read", Err: os.NewSyscallError("read", syscall.ECONNRESET)}, true},
+		// A timeout is the upstream being slow, not a dead connection: retrying
+		// would spend the client's latency budget twice.
+		"timeout": {&net.OpError{Op: "read", Err: os.ErrDeadlineExceeded}, false},
+		"other":   {errors.New("nope"), false},
+	} {
+		if got := staleConn(tc.err); got != tc.want {
+			t.Errorf("%s: staleConn = %v, want %v", name, got, tc.want)
+		}
+	}
+}

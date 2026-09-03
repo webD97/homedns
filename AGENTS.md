@@ -189,12 +189,31 @@ queries answer the question.
 connection cache, which looks like the culprit until you notice `forward`
 already enables TLS session resumption (`forward/setup.go`), so a miss costs a
 *resumed* handshake. Mean (40 ms) against p50 (26 ms) puts it at ~30 ms on a
-third of queries: ~10 ms of mean, invisible at p99. `expire` is 30s because it
-is free, not because it fixes anything. A keepalive ticker was designed and
-dropped for the same reason — `Transport.Dial` + `Yield` refreshes a pooled
-connection with no query at all, and both are exported — but it buys mean, not
-tail, and it muddies the dial-rate metric that would justify it. Build it only
-if that panel still shows misses.
+third of queries: ~10 ms of mean, invisible at p99. A keepalive ticker was
+designed and dropped on that basis — `Transport.Dial` + `Yield` refreshes a
+pooled connection with no query at all, and both are exported — but it buys
+mean, not tail. Build it only if the dial-rate panel still shows misses.
+
+**`expire` is 10s, and raising it is a trap that already bit.** It shipped at 30s
+on the reasoning above — longer window, warmer pool, and it costs nothing. It
+costs plenty. A public resolver hangs up on an idle DoT connection at around ten
+seconds, so past that there is nothing left to keep warm and the pool simply
+fills with dead connections. Worse, `race` dials every upstream at once, so every
+pool goes stale at the same instant: all legs fail together, there is no
+surviving leg to fall back to, and the client gets a SERVFAIL. Under `forward`
+this is mostly invisible because it tries the next proxy in its list; `race` has
+no next.
+
+**A dead pooled connection arrives in two shapes, and CoreDNS only names one.**
+`proxy.Connect` returns `ErrCachedClosed` when the *read* hits `io.EOF` on a
+connection that came from the pool. When the *write* goes first — the common
+case — it fails with `EPIPE` or `ECONNRESET` and comes back as a raw syscall
+error with no marker at all. Retrying only `ErrCachedClosed` (which is what
+`forward` does) leaves the second shape failing the query outright. Both are
+retried here, timeouts deliberately are not, and the retry ceiling is derived
+from `maxIdleConns` rather than guessed: each attempt discards exactly one
+pooled connection, so draining a full pool has to fit inside it. A fixed ceiling
+of 2 does not.
 
 **Losing legs are never cancelled.** `pkg/proxy`'s `lookupDNS` ignores its
 context entirely — the parameter is literally `_ctx` — so cancelling buys

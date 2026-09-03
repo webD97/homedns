@@ -74,9 +74,10 @@ cache:
 # upstream query volume by the number of servers, which is the trade.
 race:
   enabled: false
-  # Idle upstream connections are dropped after this long. Three times CoreDNS's
-  # own default, because a warm connection is one fewer handshake in the tail.
-  expire: 30s
+  # Idle upstream connections are dropped after this long. Do not raise it to
+  # "keep connections warm": public resolvers hang up on idle DoT connections at
+  # about this point, so a longer window only fills the pool with dead ones.
+  expire: 10s
 
 # Ask the other replicas before waiting on the upstream. Each replica has its
 # own cache, and externalTrafficPolicy: Local pins clients to a node, so the

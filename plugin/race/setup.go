@@ -14,10 +14,13 @@ import (
 	"github.com/coredns/coredns/plugin/pkg/transport"
 )
 
-// defaultExpire is three times pkg/proxy's own 10s. Every upstream here sees
-// every miss rather than 1/N of them, so pools already stay warmer than under
-// forward; the wider window is headroom for quiet periods.
-const defaultExpire = 30 * time.Second
+// defaultExpire matches pkg/proxy's own, and raising it is a trap: a public
+// resolver hangs up on idle DoT connections after roughly this long, so holding
+// them longer does not keep them warm, it just fills the pool with connections
+// that are already dead. An earlier 30s default did exactly that, and because
+// race dials every upstream at once, every pool went stale at the same instant
+// and the client got a SERVFAIL from all legs together.
+const defaultExpire = 10 * time.Second
 
 func init() { plugin.Register(pluginName, setup) }
 
@@ -128,6 +131,7 @@ func (rc *Race) addUpstreams(to []string) error {
 			p.SetTLSConfig(rc.tlsConfig)
 		}
 		p.SetExpire(rc.expire)
+		p.SetMaxIdleConns(maxIdleConns)
 		rc.proxies = append(rc.proxies, p)
 	}
 

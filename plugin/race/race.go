@@ -8,6 +8,8 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
+	"syscall"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
@@ -27,10 +29,16 @@ const (
 	// manager, without which no connection is ever pooled.
 	hcInterval = 500 * time.Millisecond
 
-	// connectAttempts bounds one leg. forward's equivalent loop is unbounded
-	// and leans on an outer deadline for termination; there is no outer loop
-	// here, so the bound has to be explicit.
-	connectAttempts = 2
+	// maxIdleConns caps how many connections each upstream keeps pooled. race
+	// fills a pool faster than forward does, because every query goes to every
+	// upstream at once instead of to one of them, and the drain below needs a
+	// pool depth it can be bounded by.
+	maxIdleConns = 8
+
+	// maxConnectAttempts bounds one leg. Every attempt that finds a dead pooled
+	// connection throws exactly that one away, so draining a full pool and then
+	// dialling fresh fits inside this.
+	maxConnectAttempts = maxIdleConns + 2
 )
 
 var (
@@ -146,16 +154,14 @@ func (rc *Race) exchange(ctx context.Context, p *proxy.Proxy, dw *detached.Write
 		ret *dns.Msg
 		err error
 	)
-	for range connectAttempts {
+	for range maxConnectAttempts {
 		ret, _, _, err = p.Connect(ctx, state, rc.opts)
-
-		// The remote closed a pooled connection, which only happens over TCP.
-		// Retrying here is forward's behaviour and what makes a long idle
-		// expire safe; proxy.Connect does not do it for you.
-		if errors.Is(err, proxy.ErrCachedClosed) {
-			continue
+		if !staleConn(err) {
+			break
 		}
-		break
+		// Dial has already discarded that connection, so the next attempt takes
+		// the next one and eventually dials fresh.
+		staleConns.WithLabelValues(res.to).Inc()
 	}
 
 	switch {
@@ -188,6 +194,28 @@ func (rc *Race) reply(w dns.ResponseWriter, r, m *dns.Msg) (int, error) {
 		return dns.RcodeServerFailure, err
 	}
 	return dns.RcodeSuccess, nil
+}
+
+// staleConn reports whether err means the pooled connection was already dead,
+// rather than anything being wrong with the upstream.
+//
+// proxy.Connect only names this case when the *read* returns io.EOF, and only
+// then does it become ErrCachedClosed. A *write* to a connection the peer has
+// closed fails with EPIPE or ECONNRESET and comes back as a raw syscall error,
+// which is the form that reached clients as SERVFAIL. Both mean the same thing:
+// discard it and dial a new one.
+//
+// Timeouts are deliberately not included. Those are the upstream being slow or
+// unreachable, and retrying one spends the client's latency budget twice for an
+// answer that is losing the contest anyway.
+func staleConn(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, proxy.ErrCachedClosed) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET)
 }
 
 // useful reports whether an upstream's answer can end the contest. SERVFAIL and

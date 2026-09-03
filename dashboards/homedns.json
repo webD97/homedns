@@ -2431,7 +2431,7 @@
               "transformations": []
             }
           },
-          "description": "Share of upstream queries that had to open a connection instead of reusing a pooled one; each costs a resumed TLS handshake, worth roughly 30ms. Racing lifts every pool from 1/N of the misses to all of them, so this should fall. If it does not, the deferred keepalive ticker is the fix — see AGENTS.md.",
+          "description": "Share of upstream queries that had to open a connection instead of reusing a pooled one; each costs a resumed TLS handshake, worth roughly 30ms. Racing lifts every pool from 1/N of the misses to all of them, so this should fall. Do not fix a high value by raising expire — past the resolver's own idle timeout that only pools dead connections; see AGENTS.md.",
           "id": 28,
           "links": [],
           "title": "Upstream dial rate",
@@ -2564,16 +2564,38 @@
                     },
                     "refId": "B"
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "group": "prometheus",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "editorMode": "code",
+                        "expr": "sum by (to) (rate(coredns_race_stale_conns_total{job=\"homelab-dns-system-homedns-metrics\", pod=~\"$pod\"}[$__rate_interval]))*60",
+                        "instant": false,
+                        "legendFormat": "stale conn retried {{to}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
                 }
               ],
               "queryOptions": {},
               "transformations": []
             }
           },
-          "description": "Legs that produced nothing usable, and how each query ended. 'query failed' above zero means every upstream was unreachable — the only case where the client gets a synthesized SERVFAIL.",
+          "description": "Legs that produced nothing usable, how each query ended, and pooled connections found already closed by the upstream. 'query failed' above zero means every upstream was unreachable — the only case where the client gets a synthesized SERVFAIL. Steady stale-conn retries mean expire is set past what the upstreams tolerate.",
           "id": 29,
           "links": [],
-          "title": "Race leg failures",
+          "title": "Race leg failures and retries",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",

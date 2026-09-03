@@ -19,7 +19,7 @@ and `tls://` are supported; each gets the default port for its transport, so
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `tls_servername` | — | Server name to validate `tls://` upstream certificates against. Without it they are validated against the upstream IP, which needs a certificate carrying an IP SAN. |
-| `expire` | `30s` | How long an idle upstream connection is kept. Three times CoreDNS's own default. |
+| `expire` | `10s` | How long an idle upstream connection is kept, matching CoreDNS's own default. Raising it is a trap — see below. |
 
 Fewer than two upstreams is an error: there is nothing to race, and `forward` is the plugin
 for that.
@@ -63,6 +63,19 @@ upstream truncated, the client retries over TCP exactly as it would under `forwa
 its chosen upstream immediately; `race` waits to see whether another upstream can do
 better. That is the intended trade, but it is a regression on that one path.
 
+**A pooled connection the upstream has already closed is retried, not failed.** Public
+resolvers hang up on idle DoT connections after roughly ten seconds, and CoreDNS surfaces
+that two different ways: `ErrCachedClosed` if the read hits EOF, or a raw `broken pipe` /
+`connection reset` if the write goes first. Both mean the same thing, both are retried with
+a fresh connection, and each retry is counted. Timeouts are *not* retried — those are a slow
+upstream, and this leg is losing anyway.
+
+This is why `expire` should not be raised to "keep connections warm": past the resolver's own
+idle timeout there is nothing to keep warm, and the pool just fills with connections that are
+already dead. Because `race` dials every upstream at once, they also go stale at the same
+instant, so all legs fail together and the client sees a `SERVFAIL` — which is exactly what a
+30s default did in practice.
+
 **Losing legs are neither cancelled nor waited for.** They run to completion, which is what
 returns their connection to the pool for the next query. They hold no reference to the
 client's connection, so finishing late is harmless.
@@ -79,6 +92,7 @@ bounded by the Corefile, and there are no per-domain or per-client labels.
 | --- | --- | --- |
 | `coredns_race_wins_total` | counter | `to` |
 | `coredns_race_leg_failures_total` | counter | `to`, `reason` (`error`, `mismatch`, `unusable`) |
+| `coredns_race_stale_conns_total` | counter | `to` |
 | `coredns_race_queries_total` | counter | `result` (`won`, `fallback`, `failed`) |
 
 Per-upstream latency needs nothing extra: `pkg/proxy` already reports
@@ -102,11 +116,14 @@ sum(rate(coredns_proxy_conn_cache_misses_total[5m]))
 `coredns_race_queries_total{result="failed"}` above zero means every upstream was
 unreachable — the only case where the client gets a synthesized failure.
 
+`coredns_race_stale_conns_total` climbing steadily means `expire` is set past what the
+upstreams tolerate; these are recovered, but each one costs an extra dial.
+
 ## Example
 
 ```
 race . tls://9.9.9.11 tls://149.112.112.11 {
     tls_servername dns.quad9.net
-    expire 30s
+    expire 10s
 }
 ```

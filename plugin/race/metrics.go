@@ -39,6 +39,13 @@ var (
 		Help:      "Counter of upstream legs that did not produce a usable answer.",
 	}, []string{"to", "reason"})
 
+	staleConns = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: plugin.Namespace,
+		Subsystem: pluginName,
+		Name:      "stale_conns_total",
+		Help:      "Counter of pooled connections found already closed by the upstream and retried.",
+	}, []string{"to"})
+
 	queriesCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: plugin.Namespace,
 		Subsystem: pluginName,
