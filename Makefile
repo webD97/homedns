@@ -17,6 +17,10 @@ PLATFORMS ?= linux/amd64,linux/arm64
 # validate.yaml refuses to render without zones; ci.yml passes the same thing.
 CHART_ZONES := --set gatewayAPI.zones={home.example.com}
 
+# A second server block on the same port, which is the shape forwardZones adds.
+CHART_FORWARD_ZONES := --set 'forwardZones[0].zones={corp.example.com}' \
+	--set 'forwardZones[0].servers={10.0.0.1}'
+
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -78,6 +82,7 @@ chart-lint: ## Lint and render the Helm chart
 	helm template homedns $(CHART) --set gatewayAPI.enabled=false >/dev/null
 	helm template homedns $(CHART) $(CHART_ZONES) --set peerCache.enabled=true >/dev/null
 	helm template homedns $(CHART) $(CHART_ZONES) --set race.enabled=true >/dev/null
+	helm template homedns $(CHART) $(CHART_ZONES) $(CHART_FORWARD_ZONES) >/dev/null
 
 .PHONY: coredns-version
 coredns-version: ## Print the CoreDNS version this build embeds

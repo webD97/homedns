@@ -20,3 +20,31 @@
 {{- if and .Values.race.enabled (lt (len .Values.upstream.servers) 2) }}
 {{- fail "race.enabled needs at least two upstream.servers: with one there is nothing to race, and `forward` is the plugin for that" }}
 {{- end }}
+{{- $seen := dict }}
+{{- $gatewayZones := list }}
+{{- if .Values.gatewayAPI.enabled }}
+{{- range $z := .Values.gatewayAPI.zones }}
+{{- $gatewayZones = append $gatewayZones ($z | lower | trimSuffix ".") }}
+{{- end }}
+{{- end }}
+{{- range $i, $fz := .Values.forwardZones }}
+{{- if not $fz.zones }}
+{{- fail (printf "forwardZones[%d].zones is empty. Each entry needs the zone(s) it answers, e.g. zones: [corp.example.com]" $i) }}
+{{- end }}
+{{- if not $fz.servers }}
+{{- fail (printf "forwardZones[%d].servers is empty. Each entry needs the resolver(s) to forward to, e.g. servers: [10.0.0.1]" $i) }}
+{{- end }}
+{{- range $z := $fz.zones }}
+{{- $norm := $z | lower | trimSuffix "." }}
+{{- if not $norm }}
+{{- fail (printf "forwardZones[%d] names the root zone. That is the main server block, and defining it twice is a startup error; the resolver for everything else is upstream.servers" $i) }}
+{{- end }}
+{{- if hasKey $seen $norm }}
+{{- fail (printf "forwardZones names zone %q more than once. CoreDNS refuses to start with a zone defined by two server blocks (\"cannot serve %s - it is already defined\"); put every server for a zone in one entry" $norm $norm) }}
+{{- end }}
+{{- $_ := set $seen $norm true }}
+{{- if has $norm $gatewayZones }}
+{{- fail (printf "forwardZones[%d] names zone %q, which is also a gatewayAPI.zones entry. Its server block is the more specific match, so k8s_gateway would silently stop answering for the whole zone; forward a subzone of it, or drop it from gatewayAPI.zones" $i $norm) }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -241,6 +241,62 @@ Intended, and the one path where this is a regression.
 is the sibling one. With both enabled a query that misses everything generates one
 peer probe plus N upstream queries.
 
+## forwardZones: a server block, not a forward stanza
+
+Chart-only, no Go. Each entry renders its own `zone:port { ... forward . SERVERS }`
+block beside the main one.
+
+**The obvious implementation does not work, and fails silently.** A
+`forward corp.example.com 10.0.0.1` stanza inside the main block looks right and
+can be written anywhere in it — but Corefile text order is not chain order.
+CoreDNS builds the chain from `dnsserver.Directives`, so that stanza lands at the
+`forward` slot no matter where it appears: *after* blocklist, cache, hosts,
+k8s_gateway, peercache and race. With `race.enabled` it is dead code, because
+`race .` matches every name and never falls through to it. Nothing logs a
+warning; the zone simply resolves through the public upstream. No stock plugin
+between `acl` and `blocklist` can forward, so there is no position in that block
+that would work either.
+
+A separate server block sidesteps the chain entirely. `groupConfigsByListenAddr`
+keys servers by `transport://bind:port`, so every block ending in the same port
+shares one listener, and `Server.ServeDNS` walks the qname's labels picking the
+most specific zone. The query is routed before a single plugin runs.
+
+Consequences, all deliberate:
+
+- **No extra port, Service, or containerPort.** One socket, one map entry. This
+  is the first thing people assume is needed.
+- **The port must be in the block key.** A bare `corp.example.com` key defaults
+  to `:53`, which on a `service.port=1054` deployment opens a second, real
+  listener on 53. CI's Corefile-boot step renders `service.port=1054` *with* a
+  forwardZone for exactly this reason.
+- **No blocklist, k8s_gateway, peercache or race for those names.** That is the
+  point — the zone belongs to another resolver — but it does mean a forwarded
+  zone is unfiltered, and that a `hosts` entry inside one is shadowed.
+- **`health`/`ready` stay in the main block only.** `health.OnStartup` calls
+  `reuseport.Listen` per instance, so a second one is a second HTTP listener for
+  no gain; `ready` is deduped by address but has no plugin to report on there.
+  `reload` is a global caddy event hook, so the one in the main block already
+  watches the whole file.
+- **`loop` is included.** A conditional forward aimed at a resolver that forwards
+  back here is the exact case that plugin exists for. It ends in `log.Fatalf`
+  and a pod restart, which is loud — and better than two servers amplifying one
+  query forever.
+
+`validate.yaml` rejects what CoreDNS would only reject at startup, or worse
+accept quietly: empty `zones`/`servers`, the root zone (the main block already
+serves it), the same zone in two entries (`cannot serve X - it is already
+defined`), and a zone that exactly equals a `gatewayAPI.zones` entry — that last
+one starts fine and silently stops answering cluster records for the whole zone.
+A *subzone* of a gateway zone is allowed, because being the more specific match
+is the intent.
+
+`TestForwardZoneEndToEnd` proves the bypass over the wire. Its discriminator is
+`db.corp.example.com`: blocked by the list *and* held by `hosts`, so the main
+chain would answer NXDOMAIN and only the stand-in resolver's address can prove
+the query never reached it. Same trick as the blocklist test's shadowing
+entries — don't remove either half.
+
 ## Traps that already cost time
 
 - **`caddy.Controller.NextArg()` returns the `{` token.** `RemainingArgs()` is

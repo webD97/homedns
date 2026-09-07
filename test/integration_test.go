@@ -322,6 +322,104 @@ func TestRaceEndToEnd(t *testing.T) {
 	}
 }
 
+// A forwardZones entry renders as its own server block on the same port, which
+// is what makes it take precedence: the server routes by zone before any plugin
+// runs, so the main chain is never entered.
+//
+// db.corp.example.com is the discriminator. The blocklist blocks the zone and
+// hosts holds the name, so the main chain would answer NXDOMAIN — the fake
+// resolver's address coming back is what proves the query bypassed it. Do not
+// drop either entry; without them the test passes for the wrong reason.
+const forwardZoneCorefileTemplate = `.:{{DNS}} {
+    blocklist {
+        url {{URL}}
+        ready_timeout 60s
+    }
+    hosts {
+        10.1.2.3 db.corp.example.com
+        10.1.2.4 allowed.example.org
+    }
+    ready {{READY}}
+    errors
+}
+
+corp.example.com:{{DNS}} {
+    forward . {{PEER}}
+    errors
+}
+`
+
+const forwardZoneBlocklistBody = `# test list
+0.0.0.0 corp.example.com
+0.0.0.0 ads.example.com
+`
+
+func TestForwardZoneEndToEnd(t *testing.T) {
+	list := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(forwardZoneBlocklistBody))
+	}))
+	defer list.Close()
+
+	peer := fakeUpstream(t, 0, "10.9.9.9")
+
+	dnsAddr := freeAddr(t)
+	readyAddr := freeAddr(t)
+
+	corefile := strings.NewReplacer(
+		"{{DNS}}", port(dnsAddr),
+		"{{URL}}", list.URL,
+		"{{READY}}", readyAddr,
+		"{{PEER}}", peer,
+	).Replace(forwardZoneCorefileTemplate)
+
+	path := filepath.Join(t.TempDir(), "Corefile")
+	if err := os.WriteFile(path, []byte(corefile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stopServer(t, startServer(t, path))
+	waitForDNS(t, dnsAddr)
+
+	// The blocklist has to be loaded, or "still blocked" proves nothing.
+	waitUntil(t, 30*time.Second, "never became ready", func() bool {
+		return readyCode(t, readyAddr) == http.StatusOK
+	})
+
+	// Every one of these goes to the same address: two server blocks, one
+	// listener.
+	for _, tc := range []struct {
+		name  string
+		qname string
+		rcode int
+		addr  string
+	}{
+		{"forwarded zone bypasses the main chain", "db.corp.example.com.", dns.RcodeSuccess, "10.9.9.9"},
+		{"a name the forwarded zone does not cover is still blocked", "ads.example.com.", dns.RcodeNameError, ""},
+		{"the main chain still answers everything else", "allowed.example.org.", dns.RcodeSuccess, "10.1.2.4"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := query(t, dnsAddr, tc.qname)
+			if resp.Rcode != tc.rcode {
+				t.Fatalf("%s: rcode %s, want %s", tc.qname,
+					dns.RcodeToString[resp.Rcode], dns.RcodeToString[tc.rcode])
+			}
+			if tc.addr == "" {
+				return
+			}
+			if len(resp.Answer) != 1 {
+				t.Fatalf("%s: %d answers, want 1", tc.qname, len(resp.Answer))
+			}
+			a, ok := resp.Answer[0].(*dns.A)
+			if !ok {
+				t.Fatalf("%s: answer is %T, want *dns.A", tc.qname, resp.Answer[0])
+			}
+			if a.A.String() != tc.addr {
+				t.Errorf("%s: got %s, want %s", tc.qname, a.A, tc.addr)
+			}
+		})
+	}
+}
+
 // fakeUpstream answers every query with addr after delay, on an ephemeral
 // loopback port.
 func fakeUpstream(t *testing.T, delay time.Duration, addr string) string {

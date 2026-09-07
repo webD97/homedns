@@ -63,6 +63,22 @@ upstream:
     - tls://1.0.0.1
   tlsServername: cloudflare-dns.com
 
+# Zones that must be answered by some other resolver — a router holding the LAN's
+# own zone, a corporate resolver reachable over a tunnel, the reverse zone for
+# PTR lookups. Each entry becomes its own CoreDNS server block, which is what
+# makes it take precedence: CoreDNS routes a query to the most specific server
+# block whose zone matches, so these names never enter the main chain at all —
+# no blocklist, no k8s_gateway, no peercache, no race.
+#
+# This costs no extra port. Every block ending in :{{ service.port }} shares the
+# one listener; the zone is matched inside the process.
+#
+#   - zones: [corp.example.com, 168.192.in-addr.arpa]
+#     servers: [10.0.0.1, 10.0.0.2]
+#     # Only for tls:// servers, which are otherwise validated against their IP.
+#     tlsServername: ""
+forwardZones: []
+
 cache:
   enabled: true
   ttl: 300

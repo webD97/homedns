@@ -85,12 +85,22 @@ upstream:
   servers: [tls://1.1.1.1, tls://1.0.0.1]
   tlsServername: cloudflare-dns.com
 
+forwardZones:                    # zones some other resolver owns
+  - zones: [corp.example.com, 168.192.in-addr.arpa]
+    servers: [10.0.0.1]
+
 peerCache:
   enabled: true                  # ask the other replicas before the upstream
 
 race:
   enabled: true                  # ask every upstream at once, take the first useful answer
 ```
+
+Each `forwardZones` entry becomes its own CoreDNS server block. That is what makes it
+win: the server picks the most specific block whose zone matches the query *before* any
+plugin runs, so those names never touch the blocklist, `k8s_gateway`, `peercache` or
+`race` — they go straight to the resolver that owns them. It costs no extra port, because
+every block on `:53` shares the one listener.
 
 A `Service` carrying both TCP and UDP on :53 is the default and works on Kubernetes 1.26+
 with MetalLB or Cilium. Set `service.splitTcpUdp=true` for load balancers that still

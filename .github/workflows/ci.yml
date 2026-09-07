@@ -89,6 +89,10 @@ jobs:
           helm template homedns charts/homedns \
             --set gatewayAPI.zones={home.example.com} \
             --set race.enabled=true > /dev/null
+          helm template homedns charts/homedns \
+            --set gatewayAPI.zones={home.example.com} \
+            --set 'forwardZones[0].zones={corp.example.com}' \
+            --set 'forwardZones[0].servers={10.0.0.1}' > /dev/null
 
       # The chart's job is producing a valid Corefile, so check the real binary
       # accepts the one it generates.
@@ -107,6 +111,8 @@ jobs:
             --set blocklist.enabled=false \
             --set peerCache.enabled=true \
             --set race.enabled=true \
+            --set 'forwardZones[0].zones={corp.example.com,168.192.in-addr.arpa}' \
+            --set 'forwardZones[0].servers={10.0.0.1}' \
             | python3 -c "import sys,yaml;[print(d['data']['Corefile']) for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind')=='ConfigMap']" \
             > /tmp/Corefile
           cat /tmp/Corefile

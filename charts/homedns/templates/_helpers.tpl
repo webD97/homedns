@@ -63,8 +63,24 @@ selectorLabels by construction: these are the labels the Deployment selects on. 
 app.kubernetes.io/name={{ include "homedns.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
 {{- end }}
 
-{{/* Plugin order here is irrelevant; CoreDNS orders the chain itself. */}}
+{{/* The server block keys for one forwardZones entry, each carrying the listen
+port explicitly. A bare zone key would default to :53 and open a second, real
+listener whenever service.port is not 53. */}}
+{{- define "homedns.forwardZoneKeys" -}}
+{{- $port := .root.Values.service.port -}}
+{{- $keys := list -}}
+{{- range $z := .zones -}}
+{{- $keys = append $keys (printf "%s:%v" $z $port) -}}
+{{- end -}}
+{{ join " " $keys }}
+{{- end }}
+
+{{/* Plugin order within a block is irrelevant; CoreDNS orders the chain itself.
+Order *between* blocks is what forwardZones relies on: the server routes each
+query to the most specific matching zone, so those names never reach the chain
+below. */}}
 {{- define "homedns.corefile" -}}
+{{- $root := . -}}
 {{- if .Values.corefile -}}
 {{ .Values.corefile }}
 {{- else -}}
@@ -151,5 +167,28 @@ app.kubernetes.io/name={{ include "homedns.name" . }},app.kubernetes.io/instance
     reload
     loadbalance
 }
+{{- range $fz := .Values.forwardZones }}
+
+{{ include "homedns.forwardZoneKeys" (dict "root" $root "zones" $fz.zones) }} {
+    errors
+{{- if $root.Values.log }}
+    log
+{{- end }}
+{{- if $root.Values.metrics.enabled }}
+    prometheus 0.0.0.0:{{ $root.Values.metrics.port }}
+{{- end }}
+{{- if $root.Values.cache.enabled }}
+
+    cache {{ $root.Values.cache.ttl }}
+{{- end }}
+
+    forward . {{ join " " $fz.servers }}{{ if $fz.tlsServername }} {
+        tls_servername {{ $fz.tlsServername }}
+    }{{ end }}
+
+    loop
+    loadbalance
+}
+{{- end }}
 {{- end -}}
 {{- end }}
