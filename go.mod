@@ -8,9 +8,9 @@ require (
 	github.com/k8s-gateway/k8s_gateway v1.8.2
 	github.com/miekg/dns v1.1.72
 	github.com/prometheus/client_golang v1.24.1
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
-	k8s.io/client-go v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
+	k8s.io/client-go v0.37.1
 )
 
 require (
