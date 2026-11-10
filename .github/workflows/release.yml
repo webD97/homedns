@@ -140,7 +140,7 @@ jobs:
           image: ${{ steps.v.outputs.image }}@${{ steps.build.outputs.digest }}
           artifact-name: homedns-sbom.spdx.json
 
-      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: sigstore/cosign-installer@v4.1.3
 
       - name: Sign
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
